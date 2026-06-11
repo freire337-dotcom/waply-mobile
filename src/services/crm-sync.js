@@ -20,7 +20,11 @@ const CRM_WEBHOOK_SECRET = process.env.CRM_WEBHOOK_SECRET || '';
  * @param {object} params.message
  */
 async function pushToCRM({ tenantId, convId, direction, phone, contactName, leadId, message }) {
-  if (!CRM_WEBHOOK_SECRET) return; // desactivado si no hay secret configurado
+  console.log(`[crm-sync] pushToCRM llamado: dir=${direction} phone=${phone} secret=${CRM_WEBHOOK_SECRET ? 'OK' : 'FALTA'}`);
+  if (!CRM_WEBHOOK_SECRET) {
+    console.warn('[crm-sync] CRM_WEBHOOK_SECRET no configurado — sync desactivado');
+    return;
+  }
 
   const payload = {
     event:           'message',
@@ -52,6 +56,8 @@ async function pushToCRM({ tenantId, convId, direction, phone, contactName, lead
     if (!res.ok) {
       const err = await res.text();
       console.warn(`[crm-sync] Fallo al sincronizar con CRM: ${res.status} ${err}`);
+    } else {
+      console.log(`[crm-sync] ✅ Sincronizado con CRM: conv=${convId} dir=${direction} phone=${phone}`);
     }
   } catch (e) {
     // No bloquear el flujo principal si el CRM falla

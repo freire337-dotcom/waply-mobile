@@ -31,6 +31,7 @@ router.get('/', async (req, res) => {
 // POST /webhook/meta — mensajes entrantes
 router.post('/', (req, res) => {
   res.sendStatus(200); // responder rápido a Meta
+  console.log('📨 Webhook Meta recibido:', JSON.stringify(req.body).slice(0, 200));
 
   try {
     const body = req.body;
