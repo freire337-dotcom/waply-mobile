@@ -69,7 +69,7 @@ router.get('/:id', auth, async (req, res) => {
 // PATCH /api/conversations/:id
 router.patch('/:id', auth, async (req, res) => {
   try {
-    const { assigned_to, status } = req.body;
+    const { assigned_to, status, unread_count } = req.body;
     const tid = req.agent.tenant_id;
 
     const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
@@ -79,6 +79,8 @@ router.patch('/:id', auth, async (req, res) => {
       await db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ?').run(assigned_to || null, req.params.id);
     if (status)
       await db.prepare('UPDATE conversations SET status = ? WHERE id = ?').run(status, req.params.id);
+    if (unread_count !== undefined)
+      await db.prepare('UPDATE conversations SET unread_count = ? WHERE id = ?').run(unread_count, req.params.id);
 
     const updated = await db.prepare(`
       SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
