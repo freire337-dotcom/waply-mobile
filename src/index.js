@@ -1,0 +1,88 @@
+require('dotenv').config();
+
+const express    = require('express');
+const http       = require('http');
+const { Server } = require('socket.io');
+const cors       = require('cors');
+const jwt        = require('jsonwebtoken');
+
+// Inicializar BD primero
+const db = require('./db');
+
+const authRoutes          = require('./routes/auth');
+const conversationsRoutes = require('./routes/conversations');
+const messagesRoutes      = require('./routes/messages');
+const agentsRoutes        = require('./routes/agents');
+const tenantsRoutes       = require('./routes/tenants');
+const automationsRoutes   = require('./routes/automations');
+const triggersRoutes      = require('./triggers/index');
+const metaWebhook         = require('./webhook/meta');
+const { startCronJobs }   = require('./engine/cron');
+
+const app    = express();
+const server = http.createServer(app);
+const io     = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+});
+
+app.set('io', io);
+
+// ── Middlewares ───────────────────────────────────────────────────────────────
+app.use(cors());
+app.use(express.json());
+
+// ── Rutas API ─────────────────────────────────────────────────────────────────
+app.use('/api/auth',          authRoutes);
+app.use('/api/conversations', conversationsRoutes);
+app.use('/api/conversations', messagesRoutes);
+app.use('/api/agents',        agentsRoutes);
+app.use('/api/tenants',       tenantsRoutes);
+app.use('/api/automations',   automationsRoutes);
+app.use('/api/triggers',      triggersRoutes);
+app.use('/webhook/meta',      metaWebhook);
+
+app.get('/health', (_, res) => res.json({
+  status: 'ok',
+  ts:     new Date().toISOString(),
+  uptime: process.uptime(),
+}));
+
+// ── Socket.io — multi-tenant ──────────────────────────────────────────────────
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error('Token requerido'));
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const agent   = db.prepare(
+      'SELECT id, tenant_id, name FROM agents WHERE id = ? AND active = 1'
+    ).get(payload.id);
+    if (!agent) return next(new Error('Agente no encontrado'));
+    socket.agentId   = agent.id;
+    socket.tenantId  = agent.tenant_id;
+    next();
+  } catch {
+    next(new Error('Token inválido'));
+  }
+});
+
+io.on('connection', (socket) => {
+  // Cada agente entra automáticamente a la sala de su tenant
+  socket.join(`tenant:${socket.tenantId}`);
+  console.log(`🟢 Agente #${socket.agentId} (tenant:${socket.tenantId}) conectado`);
+
+  socket.on('join:conversation',  (convId) => socket.join(`conv:${convId}`));
+  socket.on('leave:conversation', (convId) => socket.leave(`conv:${convId}`));
+  socket.on('disconnect', () => console.log(`🔴 Agente #${socket.agentId} desconectado`));
+});
+
+// ── Cron jobs ─────────────────────────────────────────────────────────────────
+startCronJobs();
+
+// ── Arrancar servidor ─────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3001;
+server.listen(PORT, () => {
+  console.log(`\n🚀 Whasat Backend corriendo en http://localhost:${PORT}`);
+  console.log(`📡 Webhook Meta:  POST http://localhost:${PORT}/webhook/meta`);
+  console.log(`🔗 Triggers CRM:  POST http://localhost:${PORT}/api/triggers/lead-created`);
+  console.log(`                  POST http://localhost:${PORT}/api/triggers/appointment-scheduled\n`);
+});
