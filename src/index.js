@@ -88,8 +88,11 @@ async function start() {
     server.listen(PORT, () => {
       console.log(`\n🚀 Whasat Backend corriendo en http://localhost:${PORT}`);
       console.log(`📡 Webhook Meta:  POST http://localhost:${PORT}/webhook/meta`);
+      console.log(`🔍 DATABASE_URL: ${(process.env.DATABASE_URL||'').slice(0,40)}...`);
       console.log(`🔗 Triggers CRM:  POST http://localhost:${PORT}/api/triggers/lead-created`);
-      console.log(`                  POST http://localhost:${PORT}/api/triggers/appointment-scheduled\n`);
+      console.log(`                  POST http://localhost:${PORT}/api/triggers/appointment-scheduled`);
+      console.log(`🔐 CRM_WEBHOOK_SECRET cargado: ${process.env.CRM_WEBHOOK_SECRET ? `SÍ (${process.env.CRM_WEBHOOK_SECRET.length} chars)` : 'NO ❌'}`);
+      console.log(`🔗 CRM_WEBHOOK_URL: ${process.env.CRM_WEBHOOK_URL || 'NO CONFIGURADA ❌'}\n`);
     });
   } catch (err) {
     console.error('❌ Error al iniciar servidor:', err);

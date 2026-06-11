@@ -20,7 +20,8 @@ const CRM_WEBHOOK_SECRET = process.env.CRM_WEBHOOK_SECRET || '';
  * @param {object} params.message
  */
 async function pushToCRM({ tenantId, convId, direction, phone, contactName, leadId, message }) {
-  console.log(`[crm-sync] pushToCRM llamado: dir=${direction} phone=${phone} secret=${CRM_WEBHOOK_SECRET ? 'OK' : 'FALTA'}`);
+  const secretLen = (process.env.CRM_WEBHOOK_SECRET || '').length;
+  console.log(`[crm-sync] pushToCRM llamado: dir=${direction} phone=${phone} secret_len=${secretLen}`);
   if (!CRM_WEBHOOK_SECRET) {
     console.warn('[crm-sync] CRM_WEBHOOK_SECRET no configurado — sync desactivado');
     return;
