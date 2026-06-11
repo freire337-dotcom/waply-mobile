@@ -4,8 +4,9 @@
  * Usa las credenciales del tenant, no variables de entorno globales
  */
 
-const axios = require('axios');
-const db    = require('../db');
+const axios    = require('axios');
+const FormData = require('form-data');
+const db       = require('../db');
 
 const GRAPH_URL = 'https://graph.facebook.com/v20.0';
 
@@ -71,6 +72,39 @@ async function sendAppointmentReminder(tenantId, toWaId, { name, date, time, tem
   return sendTemplate(tenantId, toWaId, templateName, 'es', components);
 }
 
+// ── Subir media a Meta y obtener media_id ─────────────────────────────────────
+async function uploadMedia(tenantId, buffer, mimeType, filename) {
+  const { wa_phone_id, wa_token } = await getTenantCreds(tenantId);
+  const form = new FormData();
+  form.append('messaging_product', 'whatsapp');
+  form.append('file', buffer, { filename, contentType: mimeType });
+  const res = await axios.post(
+    `${GRAPH_URL}/${wa_phone_id}/media`,
+    form,
+    { headers: { ...form.getHeaders(), Authorization: `Bearer ${wa_token}` } }
+  );
+  return res.data.id; // media_id
+}
+
+// ── Enviar mensaje de media (image / video / document / audio) ────────────────
+async function sendMedia(tenantId, toWaId, mediaType, mediaId, caption = '') {
+  const { wa_phone_id, wa_token } = await getTenantCreds(tenantId);
+  const mediaObj = { id: mediaId };
+  if (caption && mediaType !== 'audio') mediaObj.caption = caption;
+  const res = await axios.post(
+    `${GRAPH_URL}/${wa_phone_id}/messages`,
+    {
+      messaging_product: 'whatsapp',
+      to: toWaId,
+      recipient_type: 'individual',
+      type: mediaType,
+      [mediaType]: mediaObj,
+    },
+    { headers: { Authorization: `Bearer ${wa_token}` } }
+  );
+  return res.data?.messages?.[0]?.id;
+}
+
 // ── Push notification via FCM ─────────────────────────────────────────────────
 async function sendPush(tenantId, fcmToken, title, body, data = {}) {
   const tenant = await db.prepare('SELECT fcm_server_key FROM tenants WHERE id = ?').get(tenantId);
@@ -103,4 +137,4 @@ async function pushToAgent(tenantId, agentId, title, body, data = {}) {
   }
 }
 
-module.exports = { sendText, sendTemplate, sendAppointmentReminder, pushToAgent, broadcastPush };
+module.exports = { sendText, sendTemplate, sendAppointmentReminder, uploadMedia, sendMedia, pushToAgent, broadcastPush };
