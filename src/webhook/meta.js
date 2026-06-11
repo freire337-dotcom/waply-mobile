@@ -11,14 +11,14 @@ const engine = require('../engine/automation-engine');
 const wa     = require('../services/whatsapp');
 
 // GET /webhook/meta — verificación (Meta usa un solo verify token global)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
   const mode      = req.query['hub.mode'];
   const token     = req.query['hub.verify_token'];
   const challenge = req.query['hub.challenge'];
 
   // Buscamos algún tenant que tenga ese verify token
   if (mode === 'subscribe') {
-    const tenant = db.prepare('SELECT id FROM tenants WHERE wa_verify_token = ?').get(token);
+    const tenant = await db.prepare('SELECT id FROM tenants WHERE wa_verify_token = ?').get(token);
     if (tenant) {
       console.log('✅ Webhook Meta verificado');
       return res.status(200).send(challenge);
@@ -42,26 +42,27 @@ router.post('/', (req, res) => {
 
         // Identificar tenant por phone_number_id
         const phoneNumberId = value.metadata?.phone_number_id;
-        const tenant = phoneNumberId
-          ? db.prepare('SELECT * FROM tenants WHERE wa_phone_id = ? AND active = 1').get(phoneNumberId)
-          : null;
 
-        if (!tenant) {
-          console.warn('Webhook recibido para phone_id desconocido:', phoneNumberId);
-          continue;
-        }
+        db.prepare('SELECT * FROM tenants WHERE wa_phone_id = ? AND active = 1').get(phoneNumberId)
+          .then(tenant => {
+            if (!tenant) {
+              console.warn('Webhook recibido para phone_id desconocido:', phoneNumberId);
+              return;
+            }
 
-        // ── Actualizaciones de estado ──────────────────────────────────────
-        for (const status of value.statuses || []) {
-          db.prepare(`
-            UPDATE messages SET status = ? WHERE wa_message_id = ? AND tenant_id = ?
-          `).run(status.status, status.id, tenant.id);
-        }
+            // ── Actualizaciones de estado ──────────────────────────────────────
+            for (const status of value.statuses || []) {
+              db.prepare(`
+                UPDATE messages SET status = ? WHERE wa_message_id = ? AND tenant_id = ?
+              `).run(status.status, status.id, tenant.id).catch(console.error);
+            }
 
-        // ── Mensajes entrantes ─────────────────────────────────────────────
-        for (const msg of value.messages || []) {
-          processInboundMessage(msg, value, tenant, req.app.get('io')).catch(console.error);
-        }
+            // ── Mensajes entrantes ─────────────────────────────────────────────
+            for (const msg of value.messages || []) {
+              processInboundMessage(msg, value, tenant, req.app.get('io')).catch(console.error);
+            }
+          })
+          .catch(err => console.error('Error procesando webhook Meta:', err));
       }
     }
   } catch (err) {
@@ -74,22 +75,22 @@ async function processInboundMessage(msg, value, tenant, io) {
   const waName = value.contacts?.find(c => c.wa_id === waId)?.profile?.name || waId;
 
   // Upsert contacto
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO contacts (tenant_id, wa_id, name, phone)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = excluded.name
   `).run(tenant.id, waId, waName, waId);
 
-  const contact = db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenant.id, waId);
+  const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenant.id, waId);
 
   // Upsert conversación
-  let conv = db.prepare('SELECT * FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tenant.id, contact.id);
+  let conv = await db.prepare('SELECT * FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tenant.id, contact.id);
   if (!conv) {
-    const ins = db.prepare(`
+    const ins = await db.prepare(`
       INSERT INTO conversations (tenant_id, contact_id, lead_id, status)
       VALUES (?, ?, ?, 'open')
     `).run(tenant.id, contact.id, contact.lead_id || null);
-    conv = db.prepare('SELECT * FROM conversations WHERE id = ?').get(ins.lastInsertRowid);
+    conv = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(ins.lastInsertRowid);
   }
 
   // Extraer contenido del mensaje
@@ -113,22 +114,23 @@ async function processInboundMessage(msg, value, tenant, io) {
   }
 
   // Deduplicación
-  if (db.prepare('SELECT id FROM messages WHERE wa_message_id = ?').get(msg.id)) return;
+  const existing = await db.prepare('SELECT id FROM messages WHERE wa_message_id = ?').get(msg.id);
+  if (existing) return;
 
   // Insertar mensaje
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, status)
     VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, 'received')
   `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime);
 
   // Actualizar conversación
-  db.prepare(`
+  await db.prepare(`
     UPDATE conversations
-    SET last_message = ?, last_msg_at = datetime('now'), unread_count = unread_count + 1, status = 'open'
+    SET last_message = ?, last_msg_at = NOW(), unread_count = unread_count + 1, status = 'open'
     WHERE id = ?
   `).run(body_text || `[${type}]`, conv.id);
 
-  const fullConv = db.prepare(`
+  const fullConv = await db.prepare(`
     SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
@@ -136,7 +138,7 @@ async function processInboundMessage(msg, value, tenant, io) {
     WHERE c.id = ?
   `).get(conv.id);
 
-  const newMsg = db.prepare('SELECT * FROM messages WHERE wa_message_id = ?').get(msg.id);
+  const newMsg = await db.prepare('SELECT * FROM messages WHERE wa_message_id = ?').get(msg.id);
 
   // Emitir tiempo real (sala del tenant + sala de conversación)
   io.to(`tenant:${tenant.id}`).emit('conversation:updated', fullConv);
@@ -151,7 +153,7 @@ async function processInboundMessage(msg, value, tenant, io) {
   }
 
   // ── Verificar si hay un timer esperando respuesta de este contacto ────────
-  const pendingTimers = db.prepare(`
+  const pendingTimers = await db.prepare(`
     SELECT t.* FROM automation_timers t
     JOIN automation_runs r ON r.id = t.run_id
     WHERE t.tenant_id = ? AND t.status = 'pending' AND t.waiting_for = 'response'

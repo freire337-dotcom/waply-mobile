@@ -10,7 +10,7 @@ const db     = require('../db');
 const engine = require('../engine/automation-engine');
 
 // Middleware de autenticación por tenant
-function tenantAuth(req, res, next) {
+async function tenantAuth(req, res, next) {
   const tenantSlug = req.headers['x-tenant-slug'];
   const tenantKey  = req.headers['x-tenant-key'];
 
@@ -26,7 +26,7 @@ function tenantAuth(req, res, next) {
     return res.status(401).json({ error: 'Credenciales de tenant inválidas' });
   }
 
-  const tenant = db.prepare('SELECT * FROM tenants WHERE slug = ? AND active = 1').get(tenantSlug);
+  const tenant = await db.prepare('SELECT * FROM tenants WHERE slug = ? AND active = 1').get(tenantSlug);
   if (!tenant) return res.status(404).json({ error: 'Tenant no encontrado o inactivo' });
 
   req.tenant = tenant;
@@ -47,7 +47,7 @@ router.post('/lead-created', tenantAuth, async (req, res) => {
 
   // Upsert contacto
   if (waId) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO contacts (tenant_id, wa_id, name, phone, lead_id)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
@@ -57,16 +57,16 @@ router.post('/lead-created', tenantAuth, async (req, res) => {
   }
 
   const contact = waId
-    ? db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId)
+    ? await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId)
     : null;
 
   // Crear o recuperar conversación
   let convId = null;
   if (contact) {
-    let conv = db.prepare('SELECT id FROM conversations WHERE tenant_id = ? AND contact_id = ?')
+    let conv = await db.prepare('SELECT id FROM conversations WHERE tenant_id = ? AND contact_id = ?')
       .get(tenantId, contact.id);
     if (!conv) {
-      const ins = db.prepare(`
+      const ins = await db.prepare(`
         INSERT INTO conversations (tenant_id, contact_id, lead_id, status)
         VALUES (?, ?, ?, 'open')
       `).run(tenantId, contact.id, lead_id || null);
@@ -96,28 +96,28 @@ router.post('/appointment-scheduled', tenantAuth, async (req, res) => {
 
   const waId   = phone?.replace(/\D/g, '');
   let contact  = waId
-    ? db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId)
+    ? await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId)
     : null;
 
   // Si no existe el contacto, crearlo
   if (!contact && waId) {
-    db.prepare(`
+    await db.prepare(`
       INSERT INTO contacts (tenant_id, wa_id, name, phone, lead_id)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = excluded.name
     `).run(tenantId, waId, contact_name || null, phone || null, lead_id || null);
-    contact = db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId);
+    contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId);
   }
 
   // Buscar agente por email si se pasa
   let agentId = null;
   if (agent_email) {
-    const agent = db.prepare('SELECT id FROM agents WHERE tenant_id = ? AND email = ?').get(tenantId, agent_email);
+    const agent = await db.prepare('SELECT id FROM agents WHERE tenant_id = ? AND email = ?').get(tenantId, agent_email);
     agentId = agent?.id || null;
   }
 
   // Upsert cita
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO appointments (tenant_id, crm_appointment_id, lead_id, contact_id, scheduled_at, agent_id)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(tenant_id, crm_appointment_id) DO UPDATE SET

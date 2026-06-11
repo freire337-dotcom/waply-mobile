@@ -27,12 +27,11 @@ async function checkAppointmentReminders() {
   console.log('⏰ [CRON] Revisando citas próximas...');
   const now = new Date();
 
-  // Citas en exactamente 7 días (con ventana ±12h para no perder la ejecución)
   const in7  = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
   const in1  = new Date(now.getTime() + 1 * 24 * 3600 * 1000);
 
   // 7 días — recordatorio semanal
-  const appts7 = db.prepare(`
+  const appts7 = await db.prepare(`
     SELECT a.*, c.wa_id, c.name AS contact_name, c.id AS contact_id
     FROM appointments a
     JOIN contacts c ON c.id = a.contact_id
@@ -44,7 +43,7 @@ async function checkAppointmentReminders() {
   for (const appt of appts7) {
     try {
       await engine.fire('appointment.reminder_7d', appt.tenant_id, buildAppointmentContext(appt));
-      db.prepare('UPDATE appointments SET reminder_7d_sent = 1 WHERE id = ?').run(appt.id);
+      await db.prepare('UPDATE appointments SET reminder_7d_sent = 1 WHERE id = ?').run(appt.id);
       console.log(`  ✅ Recordatorio 7d enviado: cita #${appt.id}`);
     } catch (err) {
       console.error(`  ❌ Error recordatorio 7d cita #${appt.id}:`, err.message);
@@ -52,7 +51,7 @@ async function checkAppointmentReminders() {
   }
 
   // 1 día — recordatorio urgente
-  const appts1 = db.prepare(`
+  const appts1 = await db.prepare(`
     SELECT a.*, c.wa_id, c.name AS contact_name, c.id AS contact_id
     FROM appointments a
     JOIN contacts c ON c.id = a.contact_id
@@ -64,7 +63,7 @@ async function checkAppointmentReminders() {
   for (const appt of appts1) {
     try {
       await engine.fire('appointment.reminder_1d', appt.tenant_id, buildAppointmentContext(appt));
-      db.prepare('UPDATE appointments SET reminder_1d_sent = 1 WHERE id = ?').run(appt.id);
+      await db.prepare('UPDATE appointments SET reminder_1d_sent = 1 WHERE id = ?').run(appt.id);
       console.log(`  ✅ Recordatorio 1d enviado: cita #${appt.id}`);
     } catch (err) {
       console.error(`  ❌ Error recordatorio 1d cita #${appt.id}:`, err.message);
@@ -86,15 +85,15 @@ function buildAppointmentContext(appt) {
       name:  appt.contact_name,
     },
     lead_id:         appt.lead_id,
-    conversation_id: null, // se asignará si existe
+    conversation_id: null,
   };
 }
 
 // ── Job 2: Timers expirados ───────────────────────────────────────────────────
 async function checkExpiredTimers() {
-  const expired = db.prepare(`
+  const expired = await db.prepare(`
     SELECT * FROM automation_timers
-    WHERE status = 'pending' AND execute_at <= datetime('now')
+    WHERE status = 'pending' AND execute_at <= NOW()
   `).all();
 
   for (const timer of expired) {

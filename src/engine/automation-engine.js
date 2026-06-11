@@ -32,7 +32,7 @@ function evaluateConditions(conditions, context) {
 
 // ── Disparar trigger ──────────────────────────────────────────────────────────
 async function fire(trigger, tenantId, data) {
-  const automations = db.prepare(`
+  const automations = await db.prepare(`
     SELECT * FROM automations
     WHERE tenant_id = ? AND trigger = ? AND active = 1
   `).all(tenantId, trigger);
@@ -42,16 +42,16 @@ async function fire(trigger, tenantId, data) {
     if (!evaluateConditions(conditions, data)) continue;
 
     // Crear run
-    const run = db.prepare(`
+    const run = await db.prepare(`
       INSERT INTO automation_runs (tenant_id, automation_id, trigger_data, status)
       VALUES (?, ?, ?, 'running')
     `).run(tenantId, auto.id, JSON.stringify(data));
 
     // Ejecutar en background (no bloquear el request)
     executeRun(run.lastInsertRowid, JSON.parse(auto.actions || '[]'), tenantId, data)
-      .catch(err => {
+      .catch(async err => {
         console.error(`Error en automation_run #${run.lastInsertRowid}:`, err.message);
-        db.prepare(`UPDATE automation_runs SET status='failed', error=?, completed_at=datetime('now') WHERE id=?`)
+        await db.prepare(`UPDATE automation_runs SET status='failed', error=?, completed_at=NOW() WHERE id=?`)
           .run(err.message, run.lastInsertRowid);
       });
   }
@@ -87,8 +87,7 @@ async function executeRun(runId, actions, tenantId, context) {
       // Si el paso queda esperando (timer), pausamos la ejecución aquí
       if (result.status === 'waiting') {
         // El timer se encargará de continuar desde action_index + 1
-        // Guardamos el contexto y acciones restantes en el timer
-        db.prepare(`
+        await db.prepare(`
           UPDATE automation_timers SET context = ?
           WHERE run_id = ? AND action_index = ? AND status = 'pending'
         `).run(
@@ -103,13 +102,13 @@ async function executeRun(runId, actions, tenantId, context) {
     }
   }
 
-  db.prepare(`UPDATE automation_runs SET status='completed', completed_at=datetime('now') WHERE id=?`)
+  await db.prepare(`UPDATE automation_runs SET status='completed', completed_at=NOW() WHERE id=?`)
     .run(runId);
 }
 
 // ── Resolver timer (respuesta del cliente o timeout) ─────────────────────────
 async function resolveTimer(timerId, { response = null, timedOut = false } = {}) {
-  const timer = db.prepare('SELECT * FROM automation_timers WHERE id = ? AND status = ?')
+  const timer = await db.prepare('SELECT * FROM automation_timers WHERE id = ? AND status = ?')
     .get(timerId, 'pending');
   if (!timer) return;
 
@@ -119,7 +118,7 @@ async function resolveTimer(timerId, { response = null, timedOut = false } = {})
   const runId           = timer.run_id;
 
   // Marcar timer como resuelto
-  db.prepare(`UPDATE automation_timers SET status = ? WHERE id = ?`)
+  await db.prepare(`UPDATE automation_timers SET status = ? WHERE id = ?`)
     .run(timedOut ? 'expired' : 'resolved', timerId);
 
   if (timedOut || isNegativeResponse(response)) {
@@ -132,7 +131,7 @@ async function resolveTimer(timerId, { response = null, timedOut = false } = {})
 
     // Actualizar estado de la cita
     if (context.appointment?.crm_appointment_id) {
-      db.prepare(`UPDATE appointments SET status='rescheduled' WHERE crm_appointment_id=? AND tenant_id=?`)
+      await db.prepare(`UPDATE appointments SET status='rescheduled' WHERE crm_appointment_id=? AND tenant_id=?`)
         .run(context.appointment.crm_appointment_id, tenantId);
     }
   } else if (isPositiveResponse(response)) {
@@ -141,7 +140,7 @@ async function resolveTimer(timerId, { response = null, timedOut = false } = {})
     if (remainingActions.length > 0) {
       await executeRun(runId, remainingActions, tenantId, context).catch(console.error);
     } else {
-      db.prepare(`UPDATE automation_runs SET status='completed', completed_at=datetime('now') WHERE id=?`).run(runId);
+      await db.prepare(`UPDATE automation_runs SET status='completed', completed_at=NOW() WHERE id=?`).run(runId);
     }
   }
 }

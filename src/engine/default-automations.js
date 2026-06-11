@@ -53,8 +53,6 @@ const DEFAULT_AUTOMATIONS = [
           timeout_hours: 72,
         },
       },
-      // Este paso solo se ejecuta si el timer se resuelve positivamente (confirmar)
-      // El motor de automatizaciones gestiona el flujo YES/NO automáticamente
     ],
   },
 
@@ -70,7 +68,7 @@ const DEFAULT_AUTOMATIONS = [
         config: {
           template:       'recordatorio_cita_1dia',
           language:       'es',
-          timeout_hours:  3.25,   // 3 horas y 15 minutos
+          timeout_hours:  3.25,
         },
       },
     ],
@@ -82,17 +80,15 @@ const DEFAULT_AUTOMATIONS = [
  * Inserta las automatizaciones por defecto para un tenant recién creado.
  * Solo las inserta si el tenant aún no tiene automatizaciones.
  */
-function seedDefaultAutomations(tenantId) {
-  const existing = db.prepare('SELECT COUNT(*) as cnt FROM automations WHERE tenant_id = ?').get(tenantId);
-  if (existing.cnt > 0) return;
-
-  const insert = db.prepare(`
-    INSERT INTO automations (tenant_id, name, description, trigger, conditions, actions, active)
-    VALUES (?, ?, ?, ?, ?, ?, 1)
-  `);
+async function seedDefaultAutomations(tenantId) {
+  const existing = await db.prepare('SELECT COUNT(*) as cnt FROM automations WHERE tenant_id = ?').get(tenantId);
+  if (Number(existing.cnt) > 0) return;
 
   for (const auto of DEFAULT_AUTOMATIONS) {
-    insert.run(
+    await db.prepare(`
+      INSERT INTO automations (tenant_id, name, description, trigger, conditions, actions, active)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `).run(
       tenantId,
       auto.name,
       auto.description,

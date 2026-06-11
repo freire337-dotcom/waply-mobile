@@ -7,6 +7,7 @@ const cors       = require('cors');
 const jwt        = require('jsonwebtoken');
 
 // Inicializar BD primero
+const { pool, initSchema } = require('./db');
 const db = require('./db');
 
 const authRoutes          = require('./routes/auth');
@@ -49,12 +50,12 @@ app.get('/health', (_, res) => res.json({
 }));
 
 // ── Socket.io — multi-tenant ──────────────────────────────────────────────────
-io.use((socket, next) => {
+io.use(async (socket, next) => {
   const token = socket.handshake.auth?.token;
   if (!token) return next(new Error('Token requerido'));
   try {
     const payload = jwt.verify(token, process.env.JWT_SECRET);
-    const agent   = db.prepare(
+    const agent   = await db.prepare(
       'SELECT id, tenant_id, name FROM agents WHERE id = ? AND active = 1'
     ).get(payload.id);
     if (!agent) return next(new Error('Agente no encontrado'));
@@ -67,7 +68,6 @@ io.use((socket, next) => {
 });
 
 io.on('connection', (socket) => {
-  // Cada agente entra automáticamente a la sala de su tenant
   socket.join(`tenant:${socket.tenantId}`);
   console.log(`🟢 Agente #${socket.agentId} (tenant:${socket.tenantId}) conectado`);
 
@@ -76,14 +76,23 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log(`🔴 Agente #${socket.agentId} desconectado`));
 });
 
-// ── Cron jobs ─────────────────────────────────────────────────────────────────
-startCronJobs();
-
 // ── Arrancar servidor ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`\n🚀 Whasat Backend corriendo en http://localhost:${PORT}`);
-  console.log(`📡 Webhook Meta:  POST http://localhost:${PORT}/webhook/meta`);
-  console.log(`🔗 Triggers CRM:  POST http://localhost:${PORT}/api/triggers/lead-created`);
-  console.log(`                  POST http://localhost:${PORT}/api/triggers/appointment-scheduled\n`);
-});
+
+async function start() {
+  try {
+    await initSchema();
+    startCronJobs();
+    server.listen(PORT, () => {
+      console.log(`\n🚀 Whasat Backend corriendo en http://localhost:${PORT}`);
+      console.log(`📡 Webhook Meta:  POST http://localhost:${PORT}/webhook/meta`);
+      console.log(`🔗 Triggers CRM:  POST http://localhost:${PORT}/api/triggers/lead-created`);
+      console.log(`                  POST http://localhost:${PORT}/api/triggers/appointment-scheduled\n`);
+    });
+  } catch (err) {
+    console.error('❌ Error al iniciar servidor:', err);
+    process.exit(1);
+  }
+}
+
+start();

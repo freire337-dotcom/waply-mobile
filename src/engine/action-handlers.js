@@ -11,13 +11,13 @@ const wa      = require('../services/whatsapp');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getOrCreateConversation(tenantId, contactId, leadId) {
-  let conv = db.prepare(
+async function getOrCreateConversation(tenantId, contactId, leadId) {
+  let conv = await db.prepare(
     'SELECT id FROM conversations WHERE tenant_id = ? AND contact_id = ?'
   ).get(tenantId, contactId);
 
   if (!conv) {
-    const ins = db.prepare(`
+    const ins = await db.prepare(`
       INSERT INTO conversations (tenant_id, contact_id, lead_id, status)
       VALUES (?, ?, ?, 'open')
     `).run(tenantId, contactId, leadId || null);
@@ -26,8 +26,7 @@ function getOrCreateConversation(tenantId, contactId, leadId) {
   return conv;
 }
 
-function assignAgentRoundRobin(tenantId) {
-  // Obtiene el agente activo con menos conversaciones abiertas
+async function assignAgentRoundRobin(tenantId) {
   return db.prepare(`
     SELECT a.id
     FROM agents a
@@ -52,14 +51,14 @@ async function assignAgent({ tenantId, action, context }) {
   if (strategy === 'specific' && agent_id) {
     agentId = agent_id;
   } else {
-    const agent = assignAgentRoundRobin(tenantId);
+    const agent = await assignAgentRoundRobin(tenantId);
     agentId = agent?.id;
   }
   if (!agentId) return { status: 'completed', note: 'No hay agentes disponibles' };
 
   // Actualizar conversación si existe
   if (context.conversation_id) {
-    db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ? AND tenant_id = ?')
+    await db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ? AND tenant_id = ?')
       .run(agentId, context.conversation_id, tenantId);
   }
 
@@ -68,8 +67,6 @@ async function assignAgent({ tenantId, action, context }) {
 
 /**
  * send_whatsapp: envía mensaje de texto o plantilla
- * config: { type: 'text'|'template', template?: string, body?: string,
- *           body_template?: string (con variables {{lead.name}} etc.) }
  */
 async function sendWhatsapp({ tenantId, action, context }) {
   const { type = 'text', template, body_template, body, language = 'es', components = [] } = action.config || {};
@@ -95,9 +92,10 @@ async function sendWhatsapp({ tenantId, action, context }) {
 
   // Guardar en historial si hay conversación
   if (context.conversation_id && waMessageId) {
-    db.prepare(`
-      INSERT OR IGNORE INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status)
+    await db.prepare(`
+      INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status)
       VALUES (?, ?, ?, 'outbound', ?, ?, 'sent')
+      ON CONFLICT(wa_message_id) DO NOTHING
     `).run(tenantId, context.conversation_id, waMessageId, type, resolvedBody || null);
   }
 
@@ -106,7 +104,6 @@ async function sendWhatsapp({ tenantId, action, context }) {
 
 /**
  * send_appointment_reminder: plantilla de recordatorio de cita con botones YES/NO
- * config: { template: string, timeout_hours: number }
  */
 async function sendAppointmentReminder({ tenantId, action, context, runId, actionIndex }) {
   const { template, timeout_hours = 72, language = 'es' } = action.config || {};
@@ -132,7 +129,7 @@ async function sendAppointmentReminder({ tenantId, action, context, runId, actio
 
   // Crear timer — espera respuesta o expira en timeout_hours
   const executeAt = new Date(Date.now() + timeout_hours * 3600 * 1000).toISOString();
-  db.prepare(`
+  await db.prepare(`
     INSERT INTO automation_timers (tenant_id, run_id, action_index, execute_at, waiting_for, context, status)
     VALUES (?, ?, ?, ?, 'response', ?, 'pending')
   `).run(tenantId, runId, actionIndex, executeAt, JSON.stringify({
@@ -149,7 +146,6 @@ async function sendAppointmentReminder({ tenantId, action, context, runId, actio
 
 /**
  * notify_agent: push notification al comercial asignado o a todos
- * config: { message_template: string, target: 'assigned'|'all'|'specific', agent_id? }
  */
 async function notifyAgent({ tenantId, action, context }) {
   const { message_template, title = 'Whasat', target = 'assigned', agent_id } = action.config || {};
@@ -178,7 +174,7 @@ async function notifyAgent({ tenantId, action, context }) {
  */
 async function confirmAppointment({ tenantId, context }) {
   if (context.appointment?.crm_appointment_id) {
-    db.prepare(`
+    await db.prepare(`
       UPDATE appointments SET status = 'confirmed' WHERE crm_appointment_id = ? AND tenant_id = ?
     `).run(context.appointment.crm_appointment_id, tenantId);
   }
@@ -204,7 +200,6 @@ async function notifyAgentReschedule({ tenantId, action, context }) {
 
 /**
  * update_lead_field: actualiza un campo del lead en el CRM via webhook
- * config: { crm_webhook_url: string, field: string, value: string }
  */
 async function updateLeadField({ tenantId, action, context }) {
   const { crm_webhook_url, field, value } = action.config || {};
@@ -223,7 +218,6 @@ async function updateLeadField({ tenantId, action, context }) {
 
 /**
  * webhook: llama a cualquier URL externa (para integraciones con Make, Zapier, etc.)
- * config: { url, method: 'POST'|'GET', headers?: {}, body_template?: string }
  */
 async function callWebhook({ tenantId, action, context }) {
   const { url, method = 'POST', headers = {}, body_template } = action.config || {};
