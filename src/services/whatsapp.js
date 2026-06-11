@@ -10,8 +10,8 @@ const db    = require('../db');
 const GRAPH_URL = 'https://graph.facebook.com/v20.0';
 
 // Obtener credenciales del tenant
-function getTenantCreds(tenantId) {
-  const tenant = db.prepare('SELECT wa_phone_id, wa_token FROM tenants WHERE id = ?').get(tenantId);
+async function getTenantCreds(tenantId) {
+  const tenant = await db.prepare('SELECT wa_phone_id, wa_token FROM tenants WHERE id = ?').get(tenantId);
   if (!tenant?.wa_token || !tenant?.wa_phone_id) {
     throw new Error(`Tenant ${tenantId} no tiene WhatsApp configurado`);
   }
@@ -20,7 +20,7 @@ function getTenantCreds(tenantId) {
 
 // ── Enviar mensaje de texto ───────────────────────────────────────────────────
 async function sendText(tenantId, toWaId, body) {
-  const { wa_phone_id, wa_token } = getTenantCreds(tenantId);
+  const { wa_phone_id, wa_token } = await getTenantCreds(tenantId);
   const res = await axios.post(
     `${GRAPH_URL}/${wa_phone_id}/messages`,
     {
@@ -37,7 +37,7 @@ async function sendText(tenantId, toWaId, body) {
 
 // ── Enviar plantilla con botones de respuesta rápida ─────────────────────────
 async function sendTemplate(tenantId, toWaId, templateName, language = 'es', components = []) {
-  const { wa_phone_id, wa_token } = getTenantCreds(tenantId);
+  const { wa_phone_id, wa_token } = await getTenantCreds(tenantId);
   const res = await axios.post(
     `${GRAPH_URL}/${wa_phone_id}/messages`,
     {
@@ -57,7 +57,6 @@ async function sendTemplate(tenantId, toWaId, templateName, language = 'es', com
 }
 
 // ── Enviar plantilla con botones YES/NO ───────────────────────────────────────
-// Construye los componentes para plantillas interactivas de confirmación de cita
 async function sendAppointmentReminder(tenantId, toWaId, { name, date, time, templateName }) {
   const components = [
     {
@@ -74,7 +73,7 @@ async function sendAppointmentReminder(tenantId, toWaId, { name, date, time, tem
 
 // ── Push notification via FCM ─────────────────────────────────────────────────
 async function sendPush(tenantId, fcmToken, title, body, data = {}) {
-  const tenant = db.prepare('SELECT fcm_server_key FROM tenants WHERE id = ?').get(tenantId);
+  const tenant = await db.prepare('SELECT fcm_server_key FROM tenants WHERE id = ?').get(tenantId);
   if (!tenant?.fcm_server_key || !fcmToken) return;
 
   await axios.post(
@@ -90,7 +89,7 @@ async function sendPush(tenantId, fcmToken, title, body, data = {}) {
 
 // ── Enviar push a todos los agentes del tenant ────────────────────────────────
 async function broadcastPush(tenantId, title, body, data = {}) {
-  const agents = db.prepare(
+  const agents = await db.prepare(
     'SELECT fcm_token FROM agents WHERE tenant_id = ? AND fcm_token IS NOT NULL AND active = 1'
   ).all(tenantId);
   await Promise.allSettled(agents.map(a => sendPush(tenantId, a.fcm_token, title, body, data)));
@@ -98,7 +97,7 @@ async function broadcastPush(tenantId, title, body, data = {}) {
 
 // ── Push a agente específico ──────────────────────────────────────────────────
 async function pushToAgent(tenantId, agentId, title, body, data = {}) {
-  const agent = db.prepare('SELECT fcm_token FROM agents WHERE id = ? AND tenant_id = ?').get(agentId, tenantId);
+  const agent = await db.prepare('SELECT fcm_token FROM agents WHERE id = ? AND tenant_id = ?').get(agentId, tenantId);
   if (agent?.fcm_token) {
     await sendPush(tenantId, agent.fcm_token, title, body, data);
   }
