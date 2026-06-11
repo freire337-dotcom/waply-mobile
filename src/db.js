@@ -1,9 +1,12 @@
 const { Pool } = require('pg');
 
-console.log('🔍 DATABASE_URL:', process.env.DATABASE_URL ? `SET (${process.env.DATABASE_URL.substring(0, 30)}...)` : 'NOT SET ❌');
+const DB_URL = process.env.DATABASE_URL
+  || 'postgresql://postgres:IqsRVoWnimNERANtRvpGaGPnruBGYTXi@acela.proxy.rlwy.net:39726/railway';
+
+console.log('🔍 DATABASE_URL:', DB_URL.substring(0, 40) + '...');
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DB_URL,
   ssl: { rejectUnauthorized: false },
 });
 
