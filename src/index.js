@@ -16,6 +16,7 @@ const messagesRoutes      = require('./routes/messages');
 const agentsRoutes        = require('./routes/agents');
 const tenantsRoutes       = require('./routes/tenants');
 const automationsRoutes   = require('./routes/automations');
+const mediaRoutes         = require('./routes/media');
 const triggersRoutes      = require('./triggers/index');
 const metaWebhook         = require('./webhook/meta');
 const { startCronJobs }   = require('./engine/cron');
@@ -40,6 +41,7 @@ app.use('/api/conversations', messagesRoutes);
 app.use('/api/agents',        agentsRoutes);
 app.use('/api/tenants',       tenantsRoutes);
 app.use('/api/automations',   automationsRoutes);
+app.use('/api/media',         mediaRoutes);
 app.use('/api/triggers',      triggersRoutes);
 app.use('/webhook/meta',      metaWebhook);
 
