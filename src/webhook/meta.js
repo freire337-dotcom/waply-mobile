@@ -5,10 +5,11 @@
  * Identificamos el tenant por el wa_phone_number_id que viene en el payload.
  */
 
-const router = require('express').Router();
-const db     = require('../db');
-const engine = require('../engine/automation-engine');
-const wa     = require('../services/whatsapp');
+const router  = require('express').Router();
+const db      = require('../db');
+const engine  = require('../engine/automation-engine');
+const wa      = require('../services/whatsapp');
+const { pushToCRM } = require('../services/crm-sync');
 
 // GET /webhook/meta — verificación (Meta usa un solo verify token global)
 router.get('/', async (req, res) => {
@@ -165,6 +166,17 @@ async function processInboundMessage(msg, value, tenant, io) {
       await engine.resolveTimer(timer.id, { response: body_text }).catch(console.error);
     }
   }
+
+  // ── Sincronizar con CRM ───────────────────────────────────────────────────
+  pushToCRM({
+    tenantId:    tenant.id,
+    convId:      conv.id,
+    direction:   'inbound',
+    phone:       waId,
+    contactName: waName,
+    leadId:      contact.lead_id || null,
+    message:     newMsg,
+  });
 
   // ── Disparar automatización message.received ──────────────────────────────
   await engine.fire('message.received', tenant.id, {

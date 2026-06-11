@@ -1,8 +1,9 @@
-const router = require('express').Router();
-const multer = require('multer');
-const db     = require('../db');
-const auth   = require('../middleware/auth');
-const wa     = require('../services/whatsapp');
+const router  = require('express').Router();
+const multer  = require('multer');
+const db      = require('../db');
+const auth    = require('../middleware/auth');
+const wa      = require('../services/whatsapp');
+const { pushToCRM } = require('../services/crm-sync');
 
 // Multer en memoria (no guarda en disco, sube directo a Meta)
 const upload = multer({
@@ -140,6 +141,18 @@ router.post('/:convId/messages', auth, async (req, res) => {
     `).get(insert.lastInsertRowid);
 
     req.app.get('io').to(`conv:${req.params.convId}`).emit('message:new', newMsg);
+
+    // Sincronizar con CRM
+    pushToCRM({
+      tenantId:    tid,
+      convId:      Number(req.params.convId),
+      direction:   'outbound',
+      phone:       conv.wa_id,
+      contactName: conv.contact_name || conv.wa_id,
+      leadId:      conv.lead_id || null,
+      message:     newMsg,
+    });
+
     res.status(201).json({ message: newMsg });
 
   } catch (err) {
