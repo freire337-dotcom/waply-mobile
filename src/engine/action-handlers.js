@@ -83,9 +83,24 @@ async function sendWhatsapp({ tenantId, action, context }) {
     }
   );
 
+  // Resolver variables de contexto dentro de los parámetros de components
+  const resolveText = (text) => (text || '').replace(
+    /\{\{(\w+\.\w+)\}\}/g,
+    (_, path) => {
+      const [obj, key] = path.split('.');
+      return context[obj]?.[key] || '';
+    }
+  );
+  const resolvedComponents = components.map(comp => ({
+    ...comp,
+    parameters: (comp.parameters || []).map(p =>
+      p.type === 'text' ? { ...p, text: resolveText(p.text) } : p
+    ),
+  }));
+
   let waMessageId;
   if (type === 'template') {
-    waMessageId = await wa.sendTemplate(tenantId, waId, template, language, components);
+    waMessageId = await wa.sendTemplate(tenantId, waId, template, language, resolvedComponents);
   } else {
     waMessageId = await wa.sendText(tenantId, waId, resolvedBody);
   }
