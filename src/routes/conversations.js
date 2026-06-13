@@ -98,6 +98,25 @@ router.patch('/:id', auth, async (req, res) => {
   }
 });
 
+// DELETE /api/conversations/:id
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    const tid  = req.agent.tenant_id;
+    const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
+    if (!conv) return res.status(404).json({ error: 'No encontrada' });
+
+    await db.prepare('DELETE FROM messages WHERE conversation_id = ?').run(conv.id);
+    await db.prepare('DELETE FROM automation_timers WHERE tenant_id = ? AND run_id IN (SELECT id FROM automation_runs WHERE tenant_id = ? AND context LIKE ?)').run(tid, tid, `%"conversation_id":${conv.id}%`);
+    await db.prepare('DELETE FROM conversations WHERE id = ?').run(conv.id);
+
+    req.app.get('io').to(`tenant:${tid}`).emit('conversation:deleted', { id: conv.id });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // GET /api/leads/:leadId/conversation — historial del lead para el CRM
 router.get('/lead/:leadId', auth, async (req, res) => {
   try {
