@@ -8,6 +8,7 @@
 const router = require('express').Router();
 const db     = require('../db');
 const engine = require('../engine/automation-engine');
+const { normalizePhone } = require('../utils/phone');
 
 // Middleware de autenticación por tenant
 async function tenantAuth(req, res, next) {
@@ -42,8 +43,8 @@ router.post('/lead-created', tenantAuth, async (req, res) => {
 
   if (!phone && !lead_id) return;
 
-  // Normalizar teléfono (quitar +, espacios)
-  const waId = phone?.replace(/\D/g, '');
+  // Normalizar teléfono (quitar +, espacios, añadir 34 si falta)
+  const waId = phone ? normalizePhone(phone) : null;
 
   // Upsert contacto
   if (waId) {
@@ -94,7 +95,7 @@ router.post('/appointment-scheduled', tenantAuth, async (req, res) => {
 
   if (!scheduled_at || !crm_appointment_id) return;
 
-  const waId   = phone?.replace(/\D/g, '');
+  const waId   = phone ? normalizePhone(phone) : null;
   let contact  = waId
     ? await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId)
     : null;

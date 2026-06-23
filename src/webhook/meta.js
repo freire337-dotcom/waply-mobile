@@ -10,6 +10,7 @@ const db      = require('../db');
 const engine  = require('../engine/automation-engine');
 const wa      = require('../services/whatsapp');
 const { pushToCRM } = require('../services/crm-sync');
+const { normalizePhone } = require('../utils/phone');
 
 // GET /webhook/meta — verificación (Meta usa un solo verify token global)
 router.get('/', async (req, res) => {
@@ -73,8 +74,8 @@ router.post('/', (req, res) => {
 });
 
 async function processInboundMessage(msg, value, tenant, io) {
-  const waId   = msg.from;
-  const waName = value.contacts?.find(c => c.wa_id === waId)?.profile?.name || waId;
+  const waId   = normalizePhone(msg.from);
+  const waName = value.contacts?.find(c => c.wa_id === msg.from)?.profile?.name || waId;
 
   // Upsert contacto
   await db.prepare(`
