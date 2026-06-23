@@ -54,6 +54,114 @@ router.post('/', superAdminOnly, async (req, res) => {
   }
 });
 
+// GET /api/tenants — listar todos los clientes (solo superadmin)
+router.get('/', superAdminOnly, async (req, res) => {
+  try {
+    const tenants = await db.prepare(`
+      SELECT t.id, t.name, t.slug, t.plan, t.active, t.created_at,
+             (SELECT COUNT(*) FROM agents a WHERE a.tenant_id = t.id) AS agent_count,
+             (SELECT COUNT(*) FROM agents a WHERE a.tenant_id = t.id AND a.active = 1) AS active_agent_count,
+             (SELECT COUNT(*) FROM conversations c WHERE c.tenant_id = t.id) AS conversation_count
+      FROM tenants t
+      ORDER BY t.created_at DESC
+    `).all();
+    res.json({ tenants });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// GET /api/tenants/:id/agents — listar agentes de un cliente (solo superadmin)
+router.get('/:id/agents', superAdminOnly, async (req, res) => {
+  try {
+    const agents = await db.prepare(
+      'SELECT id, name, email, role, active, created_at FROM agents WHERE tenant_id = ? ORDER BY created_at'
+    ).all(req.params.id);
+    res.json({ agents });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// POST /api/tenants/:id/agents — añadir un usuario/agente a un cliente (solo superadmin)
+router.post('/:id/agents', superAdminOnly, async (req, res) => {
+  try {
+    const { name, email, password, role = 'agent' } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'name, email y password son requeridos' });
+    }
+    const existing = await db.prepare('SELECT id FROM agents WHERE email = ? AND tenant_id = ?').get(email, req.params.id);
+    if (existing) return res.status(409).json({ error: 'Email ya registrado en ese cliente' });
+
+    const hash   = bcrypt.hashSync(password, 10);
+    const insert = await db.prepare(
+      'INSERT INTO agents (tenant_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)'
+    ).run(req.params.id, name, email, hash, role);
+
+    res.status(201).json({ agent: { id: insert.lastInsertRowid, name, email, role } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PATCH /api/tenants/:id/agents/:agentId — activar/desactivar o cambiar rol (solo superadmin)
+router.patch('/:id/agents/:agentId', superAdminOnly, async (req, res) => {
+  try {
+    const { active, role } = req.body;
+    const fields = [];
+    const values = [];
+    if (active !== undefined) { fields.push('active = ?'); values.push(active ? 1 : 0); }
+    if (role   !== undefined) { fields.push('role = ?');   values.push(role); }
+    if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
+    values.push(req.params.agentId, req.params.id);
+
+    await db.prepare(`UPDATE agents SET ${fields.join(', ')} WHERE id = ? AND tenant_id = ?`).run(...values);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PATCH /api/tenants/:id/agents/:agentId/password — resetear contraseña (solo superadmin)
+router.patch('/:id/agents/:agentId/password', superAdminOnly, async (req, res) => {
+  try {
+    const { password } = req.body;
+    if (!password || password.length < 6) {
+      return res.status(400).json({ error: 'Contraseña mínimo 6 caracteres' });
+    }
+    await db.prepare('UPDATE agents SET password = ? WHERE id = ? AND tenant_id = ?')
+      .run(bcrypt.hashSync(password, 10), req.params.agentId, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// PATCH /api/tenants/:id/admin — suspender/activar cliente o cambiar plan (solo superadmin)
+router.patch('/:id/admin', superAdminOnly, async (req, res) => {
+  try {
+    const { active, plan, name } = req.body;
+    const fields = [];
+    const values = [];
+    if (active !== undefined) { fields.push('active = ?'); values.push(active ? 1 : 0); }
+    if (plan   !== undefined) { fields.push('plan = ?');   values.push(plan); }
+    if (name   !== undefined) { fields.push('name = ?');   values.push(name); }
+    if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
+    values.push(req.params.id);
+
+    await db.prepare(`UPDATE tenants SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // GET /api/tenants/:id — datos del tenant (solo admin del tenant)
 router.get('/:id', auth, async (req, res) => {
   try {
