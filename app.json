@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Whasat",
+    "slug": "whasat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#075E54"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.tuempresa.whasat"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#075E54"
+      },
+      "package": "com.tuempresa.whasat"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#075E54"
+        }
+      ]
+    ],
+    "scheme": "whasat",
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "171f4690-167b-4f58-a10f-a0eb613dbe76"
+      }
+    }
+  }
+}

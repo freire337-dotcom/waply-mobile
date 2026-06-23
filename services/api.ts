@@ -1,0 +1,71 @@
+import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// En desarrollo local, define EXPO_PUBLIC_API_URL=http://TU_IP_LOCAL:3001 en un .env
+// Sin esa variable, usa el backend de producción en Railway.
+export const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'https://waply-backend-production.up.railway.app';
+
+const api = axios.create({ baseURL: `${API_BASE}/api` });
+
+// Inyectar token JWT automáticamente
+api.interceptors.request.use(async (config) => {
+  const token = await AsyncStorage.getItem('token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+export const login = (email: string, password: string) =>
+  api.post('/auth/login', { email, password }).then(r => r.data);
+
+export const getMe = () =>
+  api.get('/auth/me').then(r => r.data.agent);
+
+export const saveFcmToken = (fcm_token: string) =>
+  api.post('/auth/fcm-token', { fcm_token });
+
+// ── Conversaciones ────────────────────────────────────────────────────────────
+export type ConvStatus = 'open' | 'closed' | 'pending' | 'all';
+
+export const getConversations = (params?: {
+  status?: ConvStatus;
+  assigned_to?: 'me' | 'unassigned';
+  page?: number;
+}) => api.get('/conversations', { params }).then(r => r.data);
+
+export const getConversation = (id: number) =>
+  api.get(`/conversations/${id}`).then(r => r.data.conversation);
+
+export const patchConversation = (id: number, data: { assigned_to?: number | null; status?: string; pipeline_stage?: string }) =>
+  api.patch(`/conversations/${id}`, data).then(r => r.data.conversation);
+
+// Etapas fijas del pipeline de ventas (campo independiente de ConvStatus)
+export const PIPELINE_STAGES: { value: string; label: string; color: string }[] = [
+  { value: 'abierto',       label: 'Abierto',       color: '#3b82f6' },
+  { value: 'contactado',    label: 'Contactado',    color: '#8b5cf6' },
+  { value: 'negociacion',   label: 'Negociación',   color: '#f59e0b' },
+  { value: 'pendiente',     label: 'Pendiente',     color: '#f97316' },
+  { value: 'venta_cerrada', label: 'Venta cerrada', color: '#22c55e' },
+  { value: 'venta_perdida', label: 'Venta perdida', color: '#ef4444' },
+];
+
+export const getPipeline = () =>
+  api.get('/conversations/pipeline').then(r => r.data);
+
+// ── Mensajes ──────────────────────────────────────────────────────────────────
+export const getMessages = (convId: number, page = 1) =>
+  api.get(`/conversations/${convId}/messages`, { params: { page } }).then(r => r.data);
+
+export const sendMessage = (convId: number, payload: {
+  type?: 'text' | 'template';
+  body?: string;
+  template_name?: string;
+  template_language?: string;
+  template_components?: unknown[];
+}) => api.post(`/conversations/${convId}/messages`, payload).then(r => r.data.message);
+
+// ── Agentes ───────────────────────────────────────────────────────────────────
+export const getAgents = () =>
+  api.get('/agents').then(r => r.data.agents);
+
+export default api;
