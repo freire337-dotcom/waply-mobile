@@ -20,6 +20,7 @@ const mediaRoutes         = require('./routes/media');
 const triggersRoutes      = require('./triggers/index');
 const metaWebhook         = require('./webhook/meta');
 const { startCronJobs }   = require('./engine/cron');
+const { setIO }           = require('./io');
 
 const app    = express();
 const server = http.createServer(app);
@@ -28,6 +29,7 @@ const io     = new Server(server, {
 });
 
 app.set('io', io);
+setIO(io); // disponible para el motor de automatizaciones (background, sin req.app)
 
 // ── Middlewares ───────────────────────────────────────────────────────────────
 app.use(cors());

@@ -8,10 +8,23 @@
  * se crean dos contactos/conversaciones distintos para la misma persona.
  */
 function normalizePhone(p) {
-  const digits = String(p || '').replace(/\D/g, '');
+  let digits = String(p || '').replace(/\D/g, '');
   if (!digits) return '';
-  // Móvil español sin prefijo de país → añadir 34
+
+  // Prefijo internacional "00" (en vez de "+") → quitarlo, ej. "0034628331770" → "34628331770"
+  if (digits.length >= 11 && digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+
+  // Trunk prefix "0" + móvil/fijo español de 9 dígitos sin código de país,
+  // ej. "0628331770" (10 dígitos) → "628331770" → añadir 34
+  if (digits.length === 10 && digits.startsWith('0')) {
+    digits = digits.slice(1);
+  }
+
+  // Móvil/fijo español sin prefijo de país (9 dígitos) → añadir 34
   if (digits.length === 9) return '34' + digits;
+
   return digits;
 }
 

@@ -8,6 +8,8 @@
 
 const db      = require('../db');
 const wa      = require('../services/whatsapp');
+const { pushToCRM } = require('../services/crm-sync');
+const { getIO }      = require('../io');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -105,13 +107,55 @@ async function sendWhatsapp({ tenantId, action, context }) {
     waMessageId = await wa.sendText(tenantId, waId, resolvedBody);
   }
 
+  // Las plantillas no tienen "body" de texto libre (van por components) — sin esto
+  // el mensaje se guarda con body=NULL y aparece en blanco en el inbox de Waply.
+  const displayBody = resolvedBody || (type === 'template' ? `[plantilla: ${template}]` : null);
+
   // Guardar en historial si hay conversación
   if (context.conversation_id && waMessageId) {
     await db.prepare(`
       INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status)
       VALUES (?, ?, ?, 'outbound', ?, ?, 'sent')
       ON CONFLICT(wa_message_id) DO NOTHING
-    `).run(tenantId, context.conversation_id, waMessageId, type, resolvedBody || null);
+    `).run(tenantId, context.conversation_id, waMessageId, type, displayBody);
+
+    // Igualar el comportamiento de un envío manual (routes/messages.js):
+    // actualizar la conversación, emitir en tiempo real y sincronizar con el CRM.
+    // Sin esto el mensaje queda guardado en BD pero invisible en el inbox en vivo
+    // (no sube al tope de la lista y el agente no recibe el evento de socket).
+    await db.prepare(`
+      UPDATE conversations
+      SET last_message = ?, last_msg_at = NOW(), status = 'open'
+      WHERE id = ? AND tenant_id = ?
+    `).run(displayBody || `[${type}]`, context.conversation_id, tenantId);
+
+    const newMsg = await db.prepare(`
+      SELECT * FROM messages WHERE wa_message_id = ? AND tenant_id = ?
+    `).get(waMessageId, tenantId);
+
+    const fullConv = await db.prepare(`
+      SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN agents a ON a.id = c.assigned_to
+      WHERE c.id = ?
+    `).get(context.conversation_id);
+
+    const io = getIO();
+    if (io) {
+      io.to(`tenant:${tenantId}`).emit('conversation:updated', fullConv);
+      io.to(`conv:${context.conversation_id}`).emit('message:new', newMsg);
+    }
+
+    pushToCRM({
+      tenantId,
+      convId:      context.conversation_id,
+      direction:   'outbound',
+      phone:       waId,
+      contactName: context.contact?.name || waId,
+      leadId:      context.lead_id || context.lead?.id || null,
+      message:     newMsg || { id: null, wa_message_id: waMessageId, type, body: displayBody },
+    });
   }
 
   return { status: 'completed', output: { wa_message_id: waMessageId } };

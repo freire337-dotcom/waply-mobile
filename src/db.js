@@ -162,6 +162,7 @@ async function initSchema() {
     );
 
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS agent_limit INTEGER;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pipeline_stage TEXT NOT NULL DEFAULT 'abierto';
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);

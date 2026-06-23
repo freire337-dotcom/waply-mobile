@@ -2,6 +2,32 @@ const router = require('express').Router();
 const db     = require('../db');
 const auth   = require('../middleware/auth');
 
+// Etapas válidas del pipeline de ventas (campo independiente de c.status)
+const PIPELINE_STAGES = ['abierto', 'contactado', 'negociacion', 'pendiente', 'venta_cerrada', 'venta_perdida'];
+
+// GET /api/conversations/pipeline — vista Kanban: todas las conversaciones del tenant agrupables por etapa
+// (debe ir ANTES de GET /:id para que Express no confunda "pipeline" con un :id)
+router.get('/pipeline', auth, async (req, res) => {
+  try {
+    const tid = req.agent.tenant_id;
+    const rows = await db.prepare(`
+      SELECT c.id, c.pipeline_stage, c.status, c.last_message, c.last_msg_at, c.lead_id,
+             ct.id AS contact_id, ct.name AS contact_name, ct.wa_id, ct.phone,
+             a.id  AS agent_id,   a.name  AS agent_name
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN agents a ON a.id = c.assigned_to
+      WHERE c.tenant_id = ?
+      ORDER BY c.last_msg_at DESC NULLS LAST
+      LIMIT 300
+    `).all(tid);
+    res.json({ conversations: rows, stages: PIPELINE_STAGES });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 // GET /api/conversations
 router.get('/', auth, async (req, res) => {
   try {
@@ -25,7 +51,7 @@ router.get('/', auth, async (req, res) => {
     params.push(limit, offset);
 
     const rows = await db.prepare(`
-      SELECT c.id, c.status, c.unread_count, c.last_message, c.last_msg_at, c.lead_id,
+      SELECT c.id, c.status, c.pipeline_stage, c.unread_count, c.last_message, c.last_msg_at, c.lead_id,
              ct.id AS contact_id, ct.name AS contact_name, ct.wa_id, ct.phone,
              a.id  AS agent_id,   a.name  AS agent_name
       FROM conversations c
@@ -47,7 +73,7 @@ router.get('/', auth, async (req, res) => {
 router.get('/:id', auth, async (req, res) => {
   try {
     const conv = await db.prepare(`
-      SELECT c.id, c.status, c.unread_count, c.last_message, c.last_msg_at, c.lead_id,
+      SELECT c.id, c.status, c.pipeline_stage, c.unread_count, c.last_message, c.last_msg_at, c.lead_id,
              ct.id AS contact_id, ct.name AS contact_name, ct.wa_id, ct.phone,
              a.id  AS agent_id,   a.name  AS agent_name
       FROM conversations c
@@ -69,11 +95,14 @@ router.get('/:id', auth, async (req, res) => {
 // PATCH /api/conversations/:id
 router.patch('/:id', auth, async (req, res) => {
   try {
-    const { assigned_to, status, unread_count } = req.body;
+    const { assigned_to, status, unread_count, pipeline_stage } = req.body;
     const tid = req.agent.tenant_id;
 
     const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
     if (!conv) return res.status(404).json({ error: 'No encontrada' });
+
+    if (pipeline_stage !== undefined && !PIPELINE_STAGES.includes(pipeline_stage))
+      return res.status(400).json({ error: `Etapa inválida. Usa una de: ${PIPELINE_STAGES.join(', ')}` });
 
     if (assigned_to !== undefined)
       await db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ?').run(assigned_to || null, req.params.id);
@@ -81,6 +110,8 @@ router.patch('/:id', auth, async (req, res) => {
       await db.prepare('UPDATE conversations SET status = ? WHERE id = ?').run(status, req.params.id);
     if (unread_count !== undefined)
       await db.prepare('UPDATE conversations SET unread_count = ? WHERE id = ?').run(unread_count, req.params.id);
+    if (pipeline_stage !== undefined)
+      await db.prepare('UPDATE conversations SET pipeline_stage = ? WHERE id = ?').run(pipeline_stage, req.params.id);
 
     const updated = await db.prepare(`
       SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
