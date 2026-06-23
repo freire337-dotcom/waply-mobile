@@ -105,20 +105,42 @@ async function sendMedia(tenantId, toWaId, mediaType, mediaId, caption = '') {
   return res.data?.messages?.[0]?.id;
 }
 
-// ── Push notification via FCM ─────────────────────────────────────────────────
-async function sendPush(tenantId, fcmToken, title, body, data = {}) {
-  const tenant = await db.prepare('SELECT fcm_server_key FROM tenants WHERE id = ?').get(tenantId);
-  if (!tenant?.fcm_server_key || !fcmToken) return;
+// ── Push notification vía Expo Push API ───────────────────────────────────────
+// La app móvil registra un Expo push token (formato "ExponentPushToken[...]"),
+// no un token FCM nativo, así que el envío debe pasar por el servicio de Expo
+// (que internamente reenvía a FCM/APNs). Enviar este token directo a la API
+// legacy de FCM con una server key nunca funcionaba: por eso ninguna notificación
+// llegaba al móvil.
+async function sendPush(tenantId, pushToken, title, body, data = {}) {
+  if (!pushToken) return;
 
-  await axios.post(
-    'https://fcm.googleapis.com/fcm/send',
-    {
-      to: fcmToken,
-      notification: { title, body, sound: 'default' },
-      data: { type: 'whasat', ...data },
-    },
-    { headers: { Authorization: `key=${tenant.fcm_server_key}` } }
-  );
+  if (!pushToken.startsWith('ExponentPushToken[')) {
+    console.warn(`sendPush: token con formato no soportado para tenant ${tenantId}, se ignora`);
+    return;
+  }
+
+  try {
+    const res = await axios.post(
+      'https://exp.host/--/api/v2/push/send',
+      {
+        to: pushToken,
+        title,
+        body,
+        sound: 'default',
+        priority: 'high',
+        channelId: 'default',
+        data: { type: 'whasat', ...data },
+      },
+      { headers: { Accept: 'application/json', 'Content-Type': 'application/json' } }
+    );
+
+    const ticket = res.data?.data;
+    if (ticket?.status === 'error') {
+      console.warn(`sendPush: Expo devolvió error para tenant ${tenantId}:`, ticket.message);
+    }
+  } catch (err) {
+    console.error(`sendPush: fallo al enviar push (tenant ${tenantId}):`, err.message);
+  }
 }
 
 // ── Enviar push a todos los agentes del tenant ────────────────────────────────
