@@ -28,6 +28,14 @@ router.post('/', auth, async (req, res) => {
     const existing = await db.prepare('SELECT id FROM agents WHERE email = ? AND tenant_id = ?').get(email, req.agent.tenant_id);
     if (existing) return res.status(409).json({ error: 'Email ya registrado' });
 
+    const tenant = await db.prepare('SELECT agent_limit FROM tenants WHERE id = ?').get(req.agent.tenant_id);
+    if (tenant?.agent_limit != null) {
+      const { count } = await db.prepare('SELECT COUNT(*) AS count FROM agents WHERE tenant_id = ? AND active = 1').get(req.agent.tenant_id);
+      if (Number(count) >= tenant.agent_limit) {
+        return res.status(403).json({ error: `Has alcanzado el límite de ${tenant.agent_limit} usuarios de tu plan. Contacta con soporte para ampliarlo.` });
+      }
+    }
+
     const hash   = bcrypt.hashSync(password, 10);
     const insert = await db.prepare(`
       INSERT INTO agents (tenant_id, name, email, password, role) VALUES (?, ?, ?, ?, ?)

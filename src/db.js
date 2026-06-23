@@ -161,6 +161,8 @@ async function initSchema() {
       UNIQUE(tenant_id, crm_appointment_id)
     );
 
+    ALTER TABLE tenants ADD COLUMN IF NOT EXISTS agent_limit INTEGER;
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);

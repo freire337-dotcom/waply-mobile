@@ -58,7 +58,7 @@ router.post('/', superAdminOnly, async (req, res) => {
 router.get('/', superAdminOnly, async (req, res) => {
   try {
     const tenants = await db.prepare(`
-      SELECT t.id, t.name, t.slug, t.plan, t.active, t.created_at,
+      SELECT t.id, t.name, t.slug, t.plan, t.active, t.agent_limit, t.created_at,
              (SELECT COUNT(*) FROM agents a WHERE a.tenant_id = t.id) AS agent_count,
              (SELECT COUNT(*) FROM agents a WHERE a.tenant_id = t.id AND a.active = 1) AS active_agent_count,
              (SELECT COUNT(*) FROM conversations c WHERE c.tenant_id = t.id) AS conversation_count
@@ -94,6 +94,14 @@ router.post('/:id/agents', superAdminOnly, async (req, res) => {
     }
     const existing = await db.prepare('SELECT id FROM agents WHERE email = ? AND tenant_id = ?').get(email, req.params.id);
     if (existing) return res.status(409).json({ error: 'Email ya registrado en ese cliente' });
+
+    const tenant = await db.prepare('SELECT agent_limit FROM tenants WHERE id = ?').get(req.params.id);
+    if (tenant?.agent_limit != null) {
+      const { count } = await db.prepare('SELECT COUNT(*) AS count FROM agents WHERE tenant_id = ? AND active = 1').get(req.params.id);
+      if (Number(count) >= tenant.agent_limit) {
+        return res.status(403).json({ error: `Límite de usuarios alcanzado (${tenant.agent_limit}). Aumenta el límite del cliente para añadir más.` });
+      }
+    }
 
     const hash   = bcrypt.hashSync(password, 10);
     const insert = await db.prepare(
@@ -145,12 +153,13 @@ router.patch('/:id/agents/:agentId/password', superAdminOnly, async (req, res) =
 // PATCH /api/tenants/:id/admin — suspender/activar cliente o cambiar plan (solo superadmin)
 router.patch('/:id/admin', superAdminOnly, async (req, res) => {
   try {
-    const { active, plan, name } = req.body;
+    const { active, plan, name, agent_limit } = req.body;
     const fields = [];
     const values = [];
-    if (active !== undefined) { fields.push('active = ?'); values.push(active ? 1 : 0); }
-    if (plan   !== undefined) { fields.push('plan = ?');   values.push(plan); }
-    if (name   !== undefined) { fields.push('name = ?');   values.push(name); }
+    if (active      !== undefined) { fields.push('active = ?');      values.push(active ? 1 : 0); }
+    if (plan        !== undefined) { fields.push('plan = ?');        values.push(plan); }
+    if (name        !== undefined) { fields.push('name = ?');        values.push(name); }
+    if (agent_limit !== undefined) { fields.push('agent_limit = ?'); values.push(agent_limit === null || agent_limit === "" ? null : Number(agent_limit)); }
     if (fields.length === 0) return res.status(400).json({ error: 'Nada que actualizar' });
     values.push(req.params.id);
 
