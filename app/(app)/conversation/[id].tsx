@@ -7,6 +7,7 @@ import {
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import { Audio } from 'expo-av';
 import {
   getConversation, getMessages, sendMessage, sendMedia,
   patchConversation, getAgents, PIPELINE_STAGES,
@@ -31,8 +32,12 @@ export default function ConversationScreen() {
   const [showStagePicker, setShowStagePicker] = useState(false);
   const [showAttach, setShowAttach]     = useState(false);
   const [uploading, setUploading]       = useState(false);
+  const [isRecording, setIsRecording]   = useState(false);
+  const [recSeconds, setRecSeconds]     = useState(0);
 
   const flatRef = useRef<FlatList>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Cargar conversación y mensajes
   const load = useCallback(async () => {
@@ -202,6 +207,43 @@ export default function ConversationScreen() {
     });
   };
 
+  // Notas de voz: grabar con expo-av y enviarlas igual que cualquier otro adjunto
+  // (reusa sendMedia/uploadAndSend — el backend ya acepta audio sin cambios).
+  const startRecording = async () => {
+    try {
+      const perm = await Audio.requestPermissionsAsync();
+      if (!perm.granted) return Alert.alert('Permiso requerido', 'Necesitamos acceso al micrófono para grabar notas de voz');
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setRecSeconds(0);
+      setIsRecording(true);
+      recTimerRef.current = setInterval(() => setRecSeconds(s => s + 1), 1000);
+    } catch {
+      Alert.alert('Error', 'No se pudo iniciar la grabación');
+    }
+  };
+
+  const stopRecording = async (send: boolean) => {
+    if (recTimerRef.current) clearInterval(recTimerRef.current);
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+    setRecSeconds(0);
+    if (!recording) return;
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      if (send && uri) {
+        uploadAndSend({ uri, name: `nota_de_voz_${Date.now()}.m4a`, type: 'audio/m4a' });
+      }
+    } catch {
+      // si falla al detener, simplemente no se envía
+    }
+  };
+
+  const fmtRecTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -274,39 +316,64 @@ export default function ConversationScreen() {
       />
 
       {/* Input */}
-      <View style={styles.inputRow}>
-        <TouchableOpacity
-          style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
-          onPress={() => setShowAttach(true)}
-          disabled={isClosed || uploading}
-        >
-          {uploading
-            ? <ActivityIndicator size="small" color="#666" />
-            : <Text style={styles.attachIcon}>📎</Text>
-          }
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          value={text}
-          onChangeText={setText}
-          placeholder={isClosed ? 'Conversación cerrada' : 'Escribe un mensaje...'}
-          placeholderTextColor="#aaa"
-          multiline
-          maxLength={4096}
-          editable={!isClosed}
-          returnKeyType="default"
-        />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!text.trim() || sending || isClosed) && styles.sendBtnDisabled]}
-          onPress={handleSend}
-          disabled={!text.trim() || sending || isClosed}
-        >
-          {sending
-            ? <ActivityIndicator size="small" color="#fff" />
-            : <Text style={styles.sendIcon}>➤</Text>
-          }
-        </TouchableOpacity>
-      </View>
+      {isRecording ? (
+        <View style={styles.inputRow}>
+          <TouchableOpacity style={styles.attachBtn} onPress={() => stopRecording(false)}>
+            <Text style={styles.attachIcon}>🗑</Text>
+          </TouchableOpacity>
+          <View style={styles.recordingBar}>
+            <View style={styles.recordingDot} />
+            <Text style={styles.recordingText}>Grabando… {fmtRecTime(recSeconds)}</Text>
+          </View>
+          <TouchableOpacity style={styles.sendBtn} onPress={() => stopRecording(true)}>
+            <Text style={styles.sendIcon}>➤</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.inputRow}>
+          <TouchableOpacity
+            style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
+            onPress={() => setShowAttach(true)}
+            disabled={isClosed || uploading}
+          >
+            {uploading
+              ? <ActivityIndicator size="small" color="#666" />
+              : <Text style={styles.attachIcon}>📎</Text>
+            }
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            value={text}
+            onChangeText={setText}
+            placeholder={isClosed ? 'Conversación cerrada' : 'Escribe un mensaje...'}
+            placeholderTextColor="#aaa"
+            multiline
+            maxLength={4096}
+            editable={!isClosed}
+            returnKeyType="default"
+          />
+          {text.trim() ? (
+            <TouchableOpacity
+              style={[styles.sendBtn, (sending || isClosed) && styles.sendBtnDisabled]}
+              onPress={handleSend}
+              disabled={sending || isClosed}
+            >
+              {sending
+                ? <ActivityIndicator size="small" color="#fff" />
+                : <Text style={styles.sendIcon}>➤</Text>
+              }
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.sendBtn, isClosed && styles.sendBtnDisabled]}
+              onPress={startRecording}
+              disabled={isClosed}
+            >
+              <Text style={styles.sendIcon}>🎤</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
 
       {/* Modal selector de etapa */}
       <Modal visible={showStagePicker} transparent animationType="fade">
@@ -512,6 +579,24 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: '#aaa' },
   sendIcon: { color: '#fff', fontSize: 18, marginLeft: 2 },
+
+  recordingBar: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    height: 44,
+    gap: 8,
+  },
+  recordingDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#e53e3e',
+  },
+  recordingText: { fontSize: 14, color: '#111' },
 
   // Modal
   modalOverlay: {

@@ -38,6 +38,12 @@
           "photosPermission": "Waply necesita acceso a tus fotos para enviarlas en el chat.",
           "cameraPermission": "Waply necesita acceso a la cámara para enviar fotos en el chat."
         }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Waply necesita acceso al micrófono para grabar notas de voz."
+        }
       ]
     ],
     "scheme": "whasat",
