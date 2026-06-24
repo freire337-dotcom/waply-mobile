@@ -128,7 +128,14 @@ async function sendPush(tenantId, pushToken, title, body, data = {}) {
         body,
         sound: 'default',
         priority: 'high',
-        channelId: 'default',
+        // Android cachea la configuración (sonido/importancia) de un canal de
+        // notificaciones la primera vez que se crea, y la ignora en instalaciones
+        // posteriores de la MISMA app (actualizar el APK no la resetea, solo
+        // desinstalar). Como el canal 'default' quedó creado en una build anterior
+        // sin sonido bien configurado, ningún cambio de código lo arreglaba — de
+        // ahí que las notificaciones llegaran mudas. Usamos un id de canal nuevo
+        // para forzar que Android lo cree desde cero con sonido habilitado.
+        channelId: 'waply-alerts',
         data: { type: 'whasat', ...data },
       },
       { headers: { Accept: 'application/json', 'Content-Type': 'application/json' } }
