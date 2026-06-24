@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Modal, Alert } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
+import { Audio } from 'expo-av';
+import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { getMediaUrl } from '../services/api';
 
@@ -70,9 +72,9 @@ export default function MessageBubble({ message: m }: Props) {
 
   // Antes esto hacía Linking.openURL(), que sacaba al usuario de la app (otra
   // pestaña/app del sistema). Para imágenes basta un Modal nativo a pantalla
-  // completa; para audio/video/documento usamos el navegador in-app de Expo
-  // (WebBrowser), que se queda dentro del contexto de la app en vez de abrir
-  // Chrome/el visor del sistema por separado.
+  // completa; para video/documento usamos el navegador in-app de Expo
+  // (WebBrowser). Los audios (notas de voz) ya no abren nada — se reproducen
+  // directamente en la burbuja con un botón play/pausa (ver más abajo).
   const openMedia = () => {
     if (!mediaUri) return;
     if (isImage) {
@@ -83,6 +85,69 @@ export default function MessageBubble({ message: m }: Props) {
   };
 
   const mediaHasFailed = imgError || fetchFailed;
+
+  // ── Reproductor de audio in-app ───────────────────────────────────────────
+  const [sound, setSound]               = useState<Audio.Sound | null>(null);
+  const [isPlaying, setIsPlaying]       = useState(false);
+  const [audioLoading, setAudioLoading] = useState(false);
+  const [positionMs, setPositionMs]     = useState(0);
+  const [durationMs, setDurationMs]     = useState(0);
+
+  useEffect(() => {
+    return () => { sound?.unloadAsync(); };
+  }, [sound]);
+
+  const onPlaybackStatusUpdate = (status: any) => {
+    if (!status.isLoaded) return;
+    setIsPlaying(status.isPlaying);
+    setPositionMs(status.positionMillis || 0);
+    setDurationMs(status.durationMillis || 0);
+    if (status.didJustFinish) {
+      setIsPlaying(false);
+      setPositionMs(0);
+    }
+  };
+
+  const toggleAudio = async () => {
+    if (!mediaUri) return;
+    try {
+      if (sound) {
+        const status = await sound.getStatusAsync();
+        if (!status.isLoaded) return;
+        if (status.isPlaying) {
+          await sound.pauseAsync();
+        } else {
+          if (status.positionMillis >= (status.durationMillis || 0) - 200) {
+            await sound.setPositionAsync(0);
+          }
+          await sound.playAsync();
+        }
+        return;
+      }
+      setAudioLoading(true);
+      await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, allowsRecordingIOS: false });
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri: mediaUri },
+        { shouldPlay: true },
+        onPlaybackStatusUpdate
+      );
+      setSound(newSound);
+    } catch {
+      Alert.alert('Error', 'No se pudo reproducir el audio');
+    } finally {
+      setAudioLoading(false);
+    }
+  };
+
+  const fmtAudioTime = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+  };
+
+  const audioProgressPct = durationMs ? Math.min(100, (positionMs / durationMs) * 100) : 0;
+  const audioTimeLabel = isPlaying || positionMs > 0
+    ? fmtAudioTime(positionMs)
+    : (durationMs ? fmtAudioTime(durationMs) : '0:00');
 
   return (
     <View style={[styles.wrapper, isOut ? styles.wrapperOut : styles.wrapperIn]}>
@@ -125,7 +190,34 @@ export default function MessageBubble({ message: m }: Props) {
           )
         )}
 
-        {['audio', 'video', 'document'].includes(m.type) && hasMedia && (
+        {m.type === 'audio' && hasMedia && (
+          fetchFailed ? (
+            <TouchableOpacity style={styles.mediaRow} onPress={fetchMedia}>
+              <Text style={styles.mediaIcon}>⚠️</Text>
+              <Text style={styles.mediaText}>No se pudo cargar — toca para reintentar</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={styles.audioRow}>
+              <TouchableOpacity
+                style={styles.audioPlayBtn}
+                onPress={toggleAudio}
+                disabled={!mediaUri || audioLoading}
+              >
+                {audioLoading || !mediaUri ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name={isPlaying ? 'pause' : 'play'} size={16} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <View style={styles.audioProgressTrack}>
+                <View style={[styles.audioProgressFill, { width: `${audioProgressPct}%` }]} />
+              </View>
+              <Text style={styles.audioTime}>{audioTimeLabel}</Text>
+            </View>
+          )
+        )}
+
+        {['video', 'document'].includes(m.type) && hasMedia && (
           <TouchableOpacity
             style={styles.mediaRow}
             onPress={fetchFailed ? fetchMedia : openMedia}
@@ -135,7 +227,7 @@ export default function MessageBubble({ message: m }: Props) {
             <Text style={styles.mediaText} numberOfLines={1}>
               {fetchFailed
                 ? 'No se pudo cargar — toca para reintentar'
-                : (m.body || (m.type === 'document' ? 'Documento' : m.type === 'audio' ? 'Audio' : 'Video'))}
+                : (m.body || (m.type === 'document' ? 'Documento' : 'Video'))}
             </Text>
             {!mediaUri && !fetchFailed && <ActivityIndicator size="small" color="#888" style={{ marginLeft: 6 }} />}
           </TouchableOpacity>
@@ -235,6 +327,40 @@ const styles = StyleSheet.create({
   },
   mediaIcon: { fontSize: 18, marginRight: 8 },
   mediaText: { fontSize: 14, color: '#333', flexShrink: 1 },
+
+  audioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+    minWidth: 170,
+    maxWidth: 220,
+    gap: 8,
+  },
+  audioPlayBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#128C7E',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  audioProgressTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    overflow: 'hidden',
+  },
+  audioProgressFill: {
+    height: 3,
+    backgroundColor: '#128C7E',
+  },
+  audioTime: {
+    fontSize: 11,
+    color: '#666',
+    minWidth: 34,
+    textAlign: 'right',
+  },
 
   meta: {
     flexDirection: 'row',
