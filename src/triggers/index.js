@@ -140,6 +140,73 @@ router.post('/lead-updated', tenantAuth, async (req, res) => {
     .catch(console.error);
 });
 
+// ── POST /api/triggers/message-sent ──────────────────────────────────────────
+// El CRM llama esto justo después de enviar un mensaje de WhatsApp directamente
+// (su función whatsapp-send habla con Meta sin pasar por Waply), para que Waply
+// se entere y lo muestre en el chat (WaplyAdmin + móvil) en tiempo real.
+router.post('/message-sent', tenantAuth, async (req, res) => {
+  res.sendStatus(200); // responder rápido, procesar en background
+
+  const { phone, contact_name, lead_id, body, type = 'text', wa_message_id, media_url } = req.body;
+  const tenantId = req.tenant.id;
+
+  if (!phone || (!body && !media_url)) return;
+
+  const waId = normalizePhone(phone);
+
+  try {
+    // Upsert contacto
+    await db.prepare(`
+      INSERT INTO contacts (tenant_id, wa_id, name, phone, lead_id)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(tenant_id, wa_id) DO UPDATE SET
+        name    = COALESCE(excluded.name, contacts.name),
+        lead_id = COALESCE(excluded.lead_id, contacts.lead_id)
+    `).run(tenantId, waId, contact_name || null, phone, lead_id || null);
+
+    const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenantId, waId);
+    if (!contact) return;
+
+    // Evitar duplicados si este mensaje ya se registró antes
+    if (wa_message_id) {
+      const dup = await db.prepare('SELECT id FROM messages WHERE tenant_id = ? AND wa_message_id = ?').get(tenantId, wa_message_id);
+      if (dup) return;
+    }
+
+    // Crear o recuperar conversación
+    let conv = await db.prepare('SELECT id FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tenantId, contact.id);
+    const preview = body || `[${type}]`;
+    let convId;
+
+    if (!conv) {
+      const ins = await db.prepare(`
+        INSERT INTO conversations (tenant_id, contact_id, lead_id, status, last_message, last_msg_at)
+        VALUES (?, ?, ?, 'open', ?, NOW())
+      `).run(tenantId, contact.id, lead_id || null, preview);
+      convId = ins.lastInsertRowid;
+    } else {
+      convId = conv.id;
+      await db.prepare(`UPDATE conversations SET last_message = ?, last_msg_at = NOW(), status = 'open' WHERE id = ?`)
+        .run(preview, convId);
+    }
+
+    const insert = await db.prepare(`
+      INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, status, sender_id)
+      VALUES (?, ?, ?, 'outbound', ?, ?, ?, 'sent', NULL)
+    `).run(tenantId, convId, wa_message_id || null, type, body || null, media_url || null);
+
+    const newMsg = await db.prepare(`
+      SELECT m.*, a.name AS sender_name FROM messages m
+      LEFT JOIN agents a ON a.id = m.sender_id
+      WHERE m.id = ?
+    `).get(insert.lastInsertRowid);
+
+    req.app.get('io').to(`conv:${convId}`).emit('message:new', newMsg);
+  } catch (err) {
+    console.error('Error en trigger message-sent:', err.message);
+  }
+});
+
 // ── GET /api/triggers/tenant-key ─────────────────────────────────────────────
 // Devuelve el key de autenticación del tenant (solo para admins autenticados)
 router.get('/tenant-key/:slug', (req, res) => {
