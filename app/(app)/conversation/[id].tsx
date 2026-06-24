@@ -8,6 +8,7 @@ import { useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
+import { Ionicons } from '@expo/vector-icons';
 import {
   getConversation, getMessages, sendMessage, sendMedia,
   patchConversation, getAgents, PIPELINE_STAGES,
@@ -235,7 +236,9 @@ export default function ConversationScreen() {
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
       if (send && uri) {
-        uploadAndSend({ uri, name: `nota_de_voz_${Date.now()}.m4a`, type: 'audio/m4a' });
+        // 'audio/mp4' (no 'audio/m4a', que no es un MIME válido para la API de WhatsApp).
+        // El contenedor real que genera expo-av en HIGH_QUALITY es MPEG-4/AAC.
+        uploadAndSend({ uri, name: `nota_de_voz_${Date.now()}.m4a`, type: 'audio/mp4' });
       }
     } catch {
       // si falla al detener, simplemente no se envía
@@ -369,7 +372,7 @@ export default function ConversationScreen() {
               onPress={startRecording}
               disabled={isClosed}
             >
-              <Text style={styles.sendIcon}>🎤</Text>
+              <Ionicons name="mic" size={19} color="#fff" />
             </TouchableOpacity>
           )}
         </View>
