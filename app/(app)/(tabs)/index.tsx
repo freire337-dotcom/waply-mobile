@@ -58,7 +58,7 @@ export default function ConversationsScreen() {
         new Date(b.last_msg_at || 0).getTime() - new Date(a.last_msg_at || 0).getTime()
       );
     });
-  });
+  }, () => fetchConversations());
 
   const totalUnread = conversations.reduce((acc, c) => acc + (c.unread_count || 0), 0);
 

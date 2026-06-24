@@ -42,7 +42,12 @@ async function registerForPushNotifications() {
   }
 
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
+    // Id de canal nuevo ('waply-alerts', antes 'default') — Android congela el
+    // sonido/importancia de un canal la primera vez que se crea y los ignora en
+    // actualizaciones posteriores de la app, solo los aplica si el canal es nuevo
+    // o tras desinstalar. Debe coincidir con el channelId que envía el backend
+    // (services/whatsapp.js) en cada push.
+    await Notifications.setNotificationChannelAsync('waply-alerts', {
       name: 'Waply',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],

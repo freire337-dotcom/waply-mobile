@@ -5,34 +5,60 @@ import { API_BASE } from '../services/api';
 
 let socket: Socket | null = null;
 
+// Callbacks en espera de que el socket exista todavía. Cubre la carrera donde la
+// pantalla de conversación se monta (useConversationSocket) antes de que useSocket()
+// termine su connect() asíncrono (ej. justo al abrir la app) — sin esto el join a la
+// sala se saltaba en silencio y esa pantalla nunca recibía mensajes en vivo.
+const onSocketReady: Array<() => void> = [];
+
+function setSocket(s: Socket | null) {
+  socket = s;
+  if (s) {
+    onSocketReady.splice(0).forEach(cb => cb());
+  }
+}
+
 export function getSocket() {
   return socket;
 }
 
-export function useSocket(onConversationUpdated?: (conv: any) => void) {
+export function useSocket(onConversationUpdated?: (conv: any) => void, onReconnect?: () => void) {
   const callbackRef = useRef(onConversationUpdated);
   callbackRef.current = onConversationUpdated;
+  const reconnectRef = useRef(onReconnect);
+  reconnectRef.current = onReconnect;
 
   useEffect(() => {
     let mounted = true;
+    let hasConnectedOnce = false;
 
     const connect = async () => {
       const token = await AsyncStorage.getItem('token');
       if (!token || !mounted) return;
 
-      socket = io(API_BASE, {
+      const s = io(API_BASE, {
         auth: { token },
         transports: ['websocket'],
         reconnectionAttempts: 10,
         reconnectionDelay: 2000,
       });
 
-      socket.on('connect', () => console.log('🟢 Socket conectado'));
-      socket.on('disconnect', (reason) => console.log('🔴 Socket desconectado:', reason));
+      s.on('connect', () => {
+        console.log('🟢 Socket conectado');
+        // Mientras el socket estuvo caído (wifi, app en background, deploy del
+        // backend) cualquier conversation:updated emitido se perdió — el servidor
+        // no los reenvía al reconectar. Sin este resync la lista se quedaba
+        // desactualizada hasta que el usuario forzaba un refresh manual.
+        if (hasConnectedOnce) reconnectRef.current?.();
+        hasConnectedOnce = true;
+      });
+      s.on('disconnect', (reason) => console.log('🔴 Socket desconectado:', reason));
 
-      socket.on('conversation:updated', (conv) => {
+      s.on('conversation:updated', (conv) => {
         callbackRef.current?.(conv);
       });
+
+      setSocket(s);
     };
 
     connect();
@@ -40,29 +66,63 @@ export function useSocket(onConversationUpdated?: (conv: any) => void) {
     return () => {
       mounted = false;
       socket?.disconnect();
-      socket = null;
+      setSocket(null);
     };
   }, []);
 }
 
 export function useConversationSocket(
   convId: number,
-  onMessage: (msg: any) => void
+  onMessage: (msg: any) => void,
+  onReconnect?: () => void
 ) {
   const callbackRef = useRef(onMessage);
   callbackRef.current = onMessage;
+  const reconnectRef = useRef(onReconnect);
+  reconnectRef.current = onReconnect;
 
   useEffect(() => {
-    if (!socket || !convId) return;
-
-    socket.emit('join:conversation', convId);
-
+    if (!convId) return;
+    let active = true;
+    let attachedSocket: Socket | null = null;
+    let hasJoinedOnce = false;
     const handler = (msg: any) => callbackRef.current(msg);
-    socket.on('message:new', handler);
+    const join = () => {
+      attachedSocket?.emit('join:conversation', convId);
+      // Igual que arriba: los mensajes que llegaron durante el corte no se
+      // reenvían solos al volver a unirse a la sala — hay que resincronizar
+      // la conversación abierta a mano (recargar mensajes desde la API).
+      if (hasJoinedOnce) reconnectRef.current?.();
+      hasJoinedOnce = true;
+    };
+
+    const attach = (s: Socket) => {
+      if (!active || attachedSocket) return;
+      attachedSocket = s;
+      s.on('message:new', handler);
+      // El servidor olvida la membresía de la sala "conv:{id}" cada vez que el
+      // socket se reconecta (ej. el móvil pierde cobertura un instante o cambia
+      // de wifi a datos) — sin re-emitir join:conversation en cada 'connect', la
+      // conversación abierta deja de recibir mensajes en vivo hasta que el usuario
+      // sale y vuelve a entrar a la pantalla. Esto es lo que se percibía como
+      // "los mensajes llegan con retardo" incluso con la app en primer plano.
+      s.on('connect', join);
+      join();
+    };
+
+    if (socket) {
+      attach(socket);
+    } else {
+      onSocketReady.push(() => { if (active && socket) attach(socket); });
+    }
 
     return () => {
-      socket?.emit('leave:conversation', convId);
-      socket?.off('message:new', handler);
+      active = false;
+      if (attachedSocket) {
+        attachedSocket.emit('leave:conversation', convId);
+        attachedSocket.off('message:new', handler);
+        attachedSocket.off('connect', join);
+      }
     };
   }, [convId]);
 }

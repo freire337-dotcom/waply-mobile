@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, Linking, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Modal } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
 import { format } from 'date-fns';
 import { getMediaUrl } from '../services/api';
 
@@ -41,20 +42,46 @@ export default function MessageBubble({ message: m }: Props) {
 
   const [mediaUri, setMediaUri] = useState<string | null>(null);
   const [imgError, setImgError] = useState(false);
+  const [fetchFailed, setFetchFailed] = useState(false);
+
+  const fetchMedia = () => {
+    if (!m.media_url) return;
+    setFetchFailed(false);
+    setImgError(false);
+    getMediaUrl(m.media_url)
+      .then(uri => setMediaUri(uri))
+      .catch(() => setFetchFailed(true));
+  };
 
   useEffect(() => {
     let active = true;
     // media_url guarda el media_id de Meta tanto para mensajes entrantes como salientes,
     // así que ambos se pueden previsualizar vía el proxy autenticado del backend.
     if (hasMedia && m.media_url) {
-      getMediaUrl(m.media_url).then(uri => { if (active) setMediaUri(uri); });
+      getMediaUrl(m.media_url)
+        .then(uri => { if (active) setMediaUri(uri); })
+        .catch(() => { if (active) setFetchFailed(true); });
     }
     return () => { active = false; };
   }, [hasMedia, m.media_url]);
 
+  const [previewVisible, setPreviewVisible] = useState(false);
+
+  // Antes esto hacía Linking.openURL(), que sacaba al usuario de la app (otra
+  // pestaña/app del sistema). Para imágenes basta un Modal nativo a pantalla
+  // completa; para audio/video/documento usamos el navegador in-app de Expo
+  // (WebBrowser), que se queda dentro del contexto de la app en vez de abrir
+  // Chrome/el visor del sistema por separado.
   const openMedia = () => {
-    if (mediaUri) Linking.openURL(mediaUri).catch(() => {});
+    if (!mediaUri) return;
+    if (isImage) {
+      setPreviewVisible(true);
+    } else {
+      WebBrowser.openBrowserAsync(mediaUri).catch(() => {});
+    }
   };
+
+  const mediaHasFailed = imgError || fetchFailed;
 
   return (
     <View style={[styles.wrapper, isOut ? styles.wrapperOut : styles.wrapperIn]}>
@@ -63,7 +90,9 @@ export default function MessageBubble({ message: m }: Props) {
           <Text style={styles.sender}>{m.sender_name}</Text>
         )}
 
-        {m.type === 'text' && (
+        {/* Mensajes de plantilla ('template') no tenían rama de render — quedaban
+            visualmente vacíos (solo hora + check), aunque sí traían body guardado. */}
+        {(m.type === 'text' || m.type === 'template') && (
           <Text style={[styles.body, isOut ? styles.bodyOut : styles.bodyIn]}>
             {m.body}
           </Text>
@@ -79,6 +108,11 @@ export default function MessageBubble({ message: m }: Props) {
                 onError={() => setImgError(true)}
               />
             </TouchableOpacity>
+          ) : mediaHasFailed ? (
+            <TouchableOpacity style={[styles.image, styles.imagePlaceholder]} onPress={fetchMedia}>
+              <Text style={styles.errorIcon}>⚠️</Text>
+              <Text style={styles.errorText}>No se pudo cargar{'\n'}toca para reintentar</Text>
+            </TouchableOpacity>
           ) : (
             <View style={[styles.image, styles.imagePlaceholder]}>
               <ActivityIndicator color="#888" />
@@ -89,14 +123,16 @@ export default function MessageBubble({ message: m }: Props) {
         {['audio', 'video', 'document'].includes(m.type) && hasMedia && (
           <TouchableOpacity
             style={styles.mediaRow}
-            onPress={openMedia}
-            disabled={!mediaUri}
+            onPress={fetchFailed ? fetchMedia : openMedia}
+            disabled={!mediaUri && !fetchFailed}
           >
-            <Text style={styles.mediaIcon}>{ICONS[m.type] || '📎'}</Text>
+            <Text style={styles.mediaIcon}>{fetchFailed ? '⚠️' : (ICONS[m.type] || '📎')}</Text>
             <Text style={styles.mediaText} numberOfLines={1}>
-              {m.body || (m.type === 'document' ? 'Documento' : m.type === 'audio' ? 'Audio' : 'Video')}
+              {fetchFailed
+                ? 'No se pudo cargar — toca para reintentar'
+                : (m.body || (m.type === 'document' ? 'Documento' : m.type === 'audio' ? 'Audio' : 'Video'))}
             </Text>
-            {!mediaUri && <ActivityIndicator size="small" color="#888" style={{ marginLeft: 6 }} />}
+            {!mediaUri && !fetchFailed && <ActivityIndicator size="small" color="#888" style={{ marginLeft: 6 }} />}
           </TouchableOpacity>
         )}
 
@@ -119,6 +155,18 @@ export default function MessageBubble({ message: m }: Props) {
           )}
         </View>
       </View>
+
+      {isImage && mediaUri && (
+        <Modal visible={previewVisible} transparent animationType="fade" onRequestClose={() => setPreviewVisible(false)}>
+          <TouchableOpacity
+            style={styles.previewBackdrop}
+            activeOpacity={1}
+            onPress={() => setPreviewVisible(false)}
+          >
+            <Image source={{ uri: mediaUri }} style={styles.previewImage} resizeMode="contain" />
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -167,6 +215,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#e5e5e5',
   },
   imagePlaceholder: { alignItems: 'center', justifyContent: 'center' },
+  errorIcon: { fontSize: 22, marginBottom: 4 },
+  errorText: { fontSize: 12, color: '#888', textAlign: 'center' },
 
   mediaRow: {
     flexDirection: 'row',
@@ -196,4 +246,15 @@ const styles = StyleSheet.create({
   statusSent:   { color: '#aaa' },
   statusRead:   { color: '#34B7F1' },
   statusFailed: { color: '#e53e3e' },
+
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
 });

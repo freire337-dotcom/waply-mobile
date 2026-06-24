@@ -60,7 +60,7 @@ export default function ConversationScreen() {
       return [...prev, newMsg];
     });
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
-  });
+  }, load);
 
   // Enviar mensaje
   const handleSend = async () => {
