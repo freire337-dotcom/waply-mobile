@@ -130,8 +130,11 @@ router.patch('/:id', auth, async (req, res) => {
 });
 
 // DELETE /api/conversations/:id
+// Solo admin puede borrar un chat completo — ocultar el botón en la UI no basta,
+// cualquiera con el token podría llamar a este endpoint directamente.
 router.delete('/:id', auth, async (req, res) => {
   try {
+    if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Solo un administrador puede eliminar conversaciones' });
     const tid  = req.agent.tenant_id;
     const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
     if (!conv) return res.status(404).json({ error: 'No encontrada' });
