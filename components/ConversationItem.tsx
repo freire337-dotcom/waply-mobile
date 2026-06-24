@@ -25,8 +25,9 @@ export default function ConversationItem({ conversation: c, onPress }: Props) {
     .join('')
     .toUpperCase();
 
-  const timeAgo = c.last_msg_at
-    ? formatDistanceToNow(new Date(c.last_msg_at + 'Z'), { addSuffix: false, locale: es })
+  const parsedDate = c.last_msg_at ? new Date(c.last_msg_at + 'Z') : null;
+  const timeAgo = parsedDate && !isNaN(parsedDate.getTime())
+    ? formatDistanceToNow(parsedDate, { addSuffix: false, locale: es })
     : '';
 
   return (

@@ -15,8 +15,8 @@ api.interceptors.request.use(async (config) => {
 });
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
-export const login = (email: string, password: string) =>
-  api.post('/auth/login', { email, password }).then(r => r.data);
+export const login = (email: string, password: string, tenant_slug: string) =>
+  api.post('/auth/login', { email, password, tenant_slug }).then(r => r.data);
 
 export const getMe = () =>
   api.get('/auth/me').then(r => r.data.agent);
@@ -63,6 +63,29 @@ export const sendMessage = (convId: number, payload: {
   template_language?: string;
   template_components?: unknown[];
 }) => api.post(`/conversations/${convId}/messages`, payload).then(r => r.data.message);
+
+// Envía un archivo (imagen/video/documento) como FormData multipart.
+// `file` es { uri, name, type } tal como lo devuelven expo-image-picker / expo-document-picker.
+export const sendMedia = (
+  convId: number,
+  file: { uri: string; name: string; type: string },
+  caption?: string
+) => {
+  const form = new FormData();
+  form.append('file', { uri: file.uri, name: file.name, type: file.type } as any);
+  if (caption) form.append('caption', caption);
+  return api.post(`/conversations/${convId}/messages/media`, form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }).then(r => r.data.message);
+};
+
+// URL autenticada para ver/descargar un media de WhatsApp (imagen, documento, audio, video).
+// El backend actúa de proxy hacia Meta porque sus URLs firmadas requieren un header Authorization
+// que un <Image>/navegador no puede enviar, así que pasamos el JWT como query param.
+export const getMediaUrl = async (mediaId: string) => {
+  const token = await AsyncStorage.getItem('token');
+  return `${API_BASE}/api/media/${mediaId}?token=${token}`;
+};
 
 // ── Agentes ───────────────────────────────────────────────────────────────────
 export const getAgents = () =>

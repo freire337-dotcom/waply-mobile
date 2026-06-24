@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Whasat",
+    "name": "Waply",
     "slug": "whasat",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,7 +20,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#075E54"
       },
-      "package": "com.tuempresa.whasat"
+      "package": "com.tuempresa.whasat",
+      "googleServicesFile": "./google-services.json"
     },
     "plugins": [
       "expo-router",
@@ -29,6 +30,13 @@
         {
           "icon": "./assets/notification-icon.png",
           "color": "#075E54"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Waply necesita acceso a tus fotos para enviarlas en el chat.",
+          "cameraPermission": "Waply necesita acceso a la cámara para enviar fotos en el chat."
         }
       ]
     ],

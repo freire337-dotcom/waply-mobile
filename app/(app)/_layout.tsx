@@ -1,13 +1,12 @@
 import { Stack } from 'expo-router';
 import { Redirect } from 'expo-router';
 import { useAuthStore } from '../../store/auth';
-import { useNotifications } from '../../hooks/useNotifications';
 import { useSocket } from '../../hooks/useSocket';
+import { useNotifications } from '../../hooks/useNotifications';
 
 export default function AppLayout() {
   const agent = useAuthStore(s => s.agent);
 
-  // Inicializar push notifications y WebSocket al entrar a la app
   useNotifications();
   useSocket();
 

@@ -1,24 +1,32 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, KeyboardAvoidingView, Platform,
   ActivityIndicator, Alert, StatusBar,
 } from 'react-native';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../../store/auth';
 
 export default function LoginScreen() {
-  const [email, setEmail]       = useState('');
-  const [password, setPassword] = useState('');
-  const { login, isLoading }    = useAuthStore();
+  const [email, setEmail]             = useState('');
+  const [password, setPassword]       = useState('');
+  const [tenantSlug, setTenantSlug]   = useState('');
+  const { login, isLoading }          = useAuthStore();
+
+  useEffect(() => {
+    AsyncStorage.getItem('tenant_slug').then((saved) => {
+      if (saved) setTenantSlug(saved);
+    });
+  }, []);
 
   const handleLogin = async () => {
-    if (!email.trim() || !password) {
-      Alert.alert('Campos requeridos', 'Ingresa email y contraseña');
+    if (!email.trim() || !password || !tenantSlug.trim()) {
+      Alert.alert('Campos requeridos', 'Ingresa empresa, email y contraseña');
       return;
     }
     try {
-      await login(email.trim().toLowerCase(), password);
+      await login(email.trim().toLowerCase(), password, tenantSlug.trim().toLowerCase());
       router.replace('/(app)/');
     } catch (err: any) {
       const msg = err?.response?.data?.error || 'Error al iniciar sesión';
@@ -35,11 +43,23 @@ export default function LoginScreen() {
 
       <View style={styles.header}>
         <Text style={styles.logo}>💬</Text>
-        <Text style={styles.title}>Whasat</Text>
+        <Text style={styles.title}>Waply</Text>
         <Text style={styles.subtitle}>CRM WhatsApp para tu equipo</Text>
       </View>
 
       <View style={styles.form}>
+        <Text style={styles.label}>Empresa</Text>
+        <TextInput
+          style={styles.input}
+          value={tenantSlug}
+          onChangeText={setTenantSlug}
+          placeholder="nombre-de-tu-empresa"
+          placeholderTextColor="#aaa"
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="next"
+        />
+
         <Text style={styles.label}>Email</Text>
         <TextInput
           style={styles.input}

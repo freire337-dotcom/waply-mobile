@@ -5,8 +5,10 @@ import {
   Alert, Modal, ScrollView,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
 import {
-  getConversation, getMessages, sendMessage,
+  getConversation, getMessages, sendMessage, sendMedia,
   patchConversation, getAgents, PIPELINE_STAGES,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
@@ -26,6 +28,9 @@ export default function ConversationScreen() {
   const [loading, setLoading]           = useState(true);
   const [showAssign, setShowAssign]     = useState(false);
   const [agents, setAgents]             = useState<any[]>([]);
+  const [showStagePicker, setShowStagePicker] = useState(false);
+  const [showAttach, setShowAttach]     = useState(false);
+  const [uploading, setUploading]       = useState(false);
 
   const flatRef = useRef<FlatList>(null);
 
@@ -116,6 +121,59 @@ export default function ConversationScreen() {
     setShowAssign(true);
   };
 
+  // Subir y enviar un archivo (foto/video/documento) ya seleccionado
+  const uploadAndSend = async (file: { uri: string; name: string; type: string }) => {
+    setUploading(true);
+    try {
+      const msg = await sendMedia(convId, file);
+      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+    } catch (err: any) {
+      const detail = err?.response?.data?.error || 'No se pudo enviar el archivo';
+      Alert.alert('Error', detail);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const pickFromGallery = async () => {
+    setShowAttach(false);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return Alert.alert('Permiso requerido', 'Necesitamos acceso a tus fotos');
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    const name = asset.fileName || asset.uri.split('/').pop() || `media_${Date.now()}`;
+    const type = asset.mimeType || (asset.type === 'video' ? 'video/mp4' : 'image/jpeg');
+    uploadAndSend({ uri: asset.uri, name, type });
+  };
+
+  const pickFromCamera = async () => {
+    setShowAttach(false);
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) return Alert.alert('Permiso requerido', 'Necesitamos acceso a tu cámara');
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    const name = asset.fileName || asset.uri.split('/').pop() || `foto_${Date.now()}.jpg`;
+    uploadAndSend({ uri: asset.uri, name, type: asset.mimeType || 'image/jpeg' });
+  };
+
+  const pickDocument = async () => {
+    setShowAttach(false);
+    const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
+    if (result.canceled || !result.assets?.length) return;
+    const asset = result.assets[0];
+    uploadAndSend({
+      uri: asset.uri,
+      name: asset.name || `archivo_${Date.now()}`,
+      type: asset.mimeType || 'application/octet-stream',
+    });
+  };
+
   if (loading) {
     return (
       <View style={styles.center}>
@@ -125,6 +183,9 @@ export default function ConversationScreen() {
   }
 
   const isClosed = conversation?.status === 'closed';
+  const currentStage = PIPELINE_STAGES.find(
+    s => s.value === (conversation?.pipeline_stage || 'abierto')
+  ) || PIPELINE_STAGES[0];
 
   return (
     <KeyboardAvoidingView
@@ -144,6 +205,13 @@ export default function ConversationScreen() {
             </Text>
           </View>
           <View style={styles.contextActions}>
+            <TouchableOpacity
+              style={[styles.stagePill, { backgroundColor: currentStage.color }]}
+              onPress={() => setShowStagePicker(true)}
+            >
+              <Text style={styles.stagePillText}>{currentStage.label}</Text>
+              <Text style={styles.stagePillCaret}>▾</Text>
+            </TouchableOpacity>
             <TouchableOpacity style={styles.actionBtn} onPress={openAssignModal}>
               <Text style={styles.actionBtnText}>
                 {conversation.agent_name ? `👤 ${conversation.agent_name.split(' ')[0]}` : '+ Asignar'}
@@ -159,35 +227,6 @@ export default function ConversationScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      )}
-
-      {/* Etapa del pipeline de ventas */}
-      {conversation && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.stageBar}
-          contentContainerStyle={styles.stageBarContent}
-        >
-          {PIPELINE_STAGES.map(stage => {
-            const active = (conversation.pipeline_stage || 'abierto') === stage.value;
-            return (
-              <TouchableOpacity
-                key={stage.value}
-                style={[
-                  styles.stageChip,
-                  { borderColor: stage.color },
-                  active && { backgroundColor: stage.color },
-                ]}
-                onPress={() => handleStageChange(stage.value)}
-              >
-                <Text style={[styles.stageChipText, active ? { color: '#fff' } : { color: stage.color }]}>
-                  {stage.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
       )}
 
       {/* Lista de mensajes */}
@@ -208,6 +247,16 @@ export default function ConversationScreen() {
 
       {/* Input */}
       <View style={styles.inputRow}>
+        <TouchableOpacity
+          style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
+          onPress={() => setShowAttach(true)}
+          disabled={isClosed || uploading}
+        >
+          {uploading
+            ? <ActivityIndicator size="small" color="#666" />
+            : <Text style={styles.attachIcon}>📎</Text>
+          }
+        </TouchableOpacity>
         <TextInput
           style={styles.input}
           value={text}
@@ -230,6 +279,61 @@ export default function ConversationScreen() {
           }
         </TouchableOpacity>
       </View>
+
+      {/* Modal selector de etapa */}
+      <Modal visible={showStagePicker} transparent animationType="fade">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowStagePicker(false)}
+        >
+          <View style={styles.stageModalBox}>
+            <Text style={styles.modalTitle}>Etapa del pipeline</Text>
+            {PIPELINE_STAGES.map(stage => {
+              const active = (conversation?.pipeline_stage || 'abierto') === stage.value;
+              return (
+                <TouchableOpacity
+                  key={stage.value}
+                  style={styles.stageOptionRow}
+                  onPress={() => { handleStageChange(stage.value); setShowStagePicker(false); }}
+                >
+                  <View style={[styles.stageDot, { backgroundColor: stage.color }]} />
+                  <Text style={[styles.stageOptionText, active && styles.bold]}>{stage.label}</Text>
+                  {active && <Text style={styles.stageCheck}>✓</Text>}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal adjuntar */}
+      <Modal visible={showAttach} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowAttach(false)}
+        >
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Adjuntar</Text>
+            <TouchableOpacity style={styles.attachOptionRow} onPress={pickFromGallery}>
+              <Text style={styles.attachOptionIcon}>🖼️</Text>
+              <Text style={styles.attachOptionText}>Foto o video de la galería</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.attachOptionRow} onPress={pickFromCamera}>
+              <Text style={styles.attachOptionIcon}>📷</Text>
+              <Text style={styles.attachOptionText}>Tomar foto</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.attachOptionRow} onPress={pickDocument}>
+              <Text style={styles.attachOptionIcon}>📄</Text>
+              <Text style={styles.attachOptionText}>Documento</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowAttach(false)}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Modal asignación */}
       <Modal visible={showAssign} transparent animationType="slide">
@@ -286,7 +390,7 @@ const styles = StyleSheet.create({
   open:           { color: '#4ade80' },
   closed:         { color: '#f87171' },
 
-  contextActions: { flexDirection: 'row', gap: 6 },
+  contextActions: { flexDirection: 'row', gap: 6, alignItems: 'center' },
   actionBtn: {
     backgroundColor: 'rgba(255,255,255,0.15)',
     paddingHorizontal: 10,
@@ -297,24 +401,55 @@ const styles = StyleSheet.create({
   actionBtnRed:   { backgroundColor: '#e53e3e' },
   actionBtnText:  { color: '#fff', fontSize: 12, fontWeight: '600' },
 
-  stageBar: {
-    backgroundColor: '#fff',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#e0e0e0',
-  },
-  stageBarContent: {
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 6,
-  },
-  stageChip: {
-    borderWidth: 1.5,
-    borderRadius: 14,
+  stagePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    marginRight: 6,
+    borderRadius: 12,
+    gap: 4,
   },
-  stageChipText: { fontSize: 12, fontWeight: '600' },
+  stagePillText:  { color: '#fff', fontSize: 12, fontWeight: '700' },
+  stagePillCaret: { color: 'rgba(255,255,255,0.85)', fontSize: 10 },
+
+  stageModalBox: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    paddingVertical: 8,
+    marginHorizontal: 32,
+    alignSelf: 'center',
+    width: '80%',
+  },
+  stageOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 13,
+    gap: 10,
+  },
+  stageDot:        { width: 10, height: 10, borderRadius: 5 },
+  stageOptionText: { fontSize: 15, color: '#111', flex: 1 },
+  stageCheck:      { fontSize: 15, color: '#25D366', fontWeight: '700' },
+
+  attachBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachIcon: { fontSize: 20 },
+  attachOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f0f0f0',
+    gap: 12,
+  },
+  attachOptionIcon: { fontSize: 22 },
+  attachOptionText: { fontSize: 15, color: '#111', fontWeight: '500' },
 
   messagesContainer:  { flex: 1 },
   messagesList:       { paddingVertical: 12 },
