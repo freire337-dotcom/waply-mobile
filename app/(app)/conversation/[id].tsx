@@ -57,25 +57,53 @@ export default function ConversationScreen() {
   useConversationSocket(convId, (newMsg) => {
     setMessages(prev => {
       if (prev.find(m => m.id === newMsg.id)) return prev;
-      return [...prev, newMsg];
+      // Si confirma un mensaje optimista (mismo cuerpo/dirección, aún "enviando"),
+      // lo reemplaza en vez de duplicarlo.
+      const withoutTemp = prev.filter(m => !(
+        typeof m.id === 'string' && m.id.startsWith('tmp-') &&
+        m.direction === newMsg.direction && m.body === newMsg.body
+      ));
+      return [...withoutTemp, newMsg];
     });
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
   }, load);
 
   // Enviar mensaje
+  // Antes se esperaba la respuesta completa del servidor (que a su vez espera
+  // a la API de WhatsApp) antes de pintar el mensaje, lo que se sentía lento.
+  // Ahora se muestra de inmediato como "enviando" (optimista) y se reconcilia
+  // con el mensaje real al llegar la respuesta — la latencia de red sigue
+  // existiendo, pero ya no se nota en la interfaz.
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
 
+    const tempId = `tmp-${Date.now()}`;
+    const optimisticMsg = {
+      id: tempId,
+      direction: 'outbound',
+      type: 'text',
+      body: trimmed,
+      status: 'sending',
+      sender_name: currentAgent?.name,
+      created_at: new Date().toISOString(),
+    };
+
     setText('');
     setSending(true);
+    setMessages(prev => [...prev, optimisticMsg]);
+    setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 50);
+
     try {
       const msg = await sendMessage(convId, { type: 'text', body: trimmed });
-      setMessages(prev => prev.find(m => m.id === msg.id) ? prev : [...prev, msg]);
-      setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
+      setMessages(prev => {
+        const withoutTemp = prev.filter(m => m.id !== tempId);
+        return withoutTemp.find(m => m.id === msg.id) ? withoutTemp : [...withoutTemp, msg];
+      });
     } catch (err: any) {
       const detail = err?.response?.data?.error || 'Error al enviar';
       Alert.alert('Error', detail);
+      setMessages(prev => prev.filter(m => m.id !== tempId));
       setText(trimmed); // restaurar texto
     } finally {
       setSending(false);

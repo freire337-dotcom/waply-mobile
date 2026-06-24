@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { router } from 'expo-router';
 import { saveFcmToken } from '../services/api';
@@ -59,7 +60,14 @@ async function registerForPushNotifications() {
   }
 
   try {
-    const token = await Notifications.getExpoPushTokenAsync();
+    // En builds de EAS (fuera de Expo Go) getExpoPushTokenAsync() necesita el
+    // projectId explícito — sin él, en producción la llamada puede fallar o
+    // devolver un token inválido de forma silenciosa, y por eso nunca llegaba
+    // ninguna notificación (no solo sonaban mudas: no llegaban en absoluto).
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+    const token = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined
+    );
     await saveFcmToken(token.data);
     console.log('FCM token registrado:', token.data);
   } catch (err) {

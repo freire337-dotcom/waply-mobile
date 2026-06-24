@@ -35,6 +35,7 @@ export default function MessageBubble({ message: m }: Props) {
     m.status === 'read'      ? '✓✓' :
     m.status === 'delivered' ? '✓✓' :
     m.status === 'sent'      ? '✓'  :
+    m.status === 'sending'   ? '🕐' :
     m.status === 'failed'    ? '✗'  : '';
 
   const isImage = m.type === 'image';
@@ -85,7 +86,11 @@ export default function MessageBubble({ message: m }: Props) {
 
   return (
     <View style={[styles.wrapper, isOut ? styles.wrapperOut : styles.wrapperIn]}>
-      <View style={[styles.bubble, isOut ? styles.bubbleOut : styles.bubbleIn]}>
+      <View style={[
+        styles.bubble,
+        isOut ? styles.bubbleOut : styles.bubbleIn,
+        m.status === 'sending' && { opacity: 0.6 },
+      ]}>
         {!isOut && m.sender_name && (
           <Text style={styles.sender}>{m.sender_name}</Text>
         )}
