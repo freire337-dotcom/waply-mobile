@@ -44,13 +44,27 @@ router.get('/:mediaId', mediaAuth, async (req, res) => {
 
     const mediaId = req.params.mediaId;
 
-    // 1. Obtener URL temporal de Meta
+    // 1. Obtener URL temporal de Meta. Justo después de subir un archivo (mensaje
+    // saliente recién enviado) Meta puede tardar un instante en propagarlo, así que
+    // reintentamos un par de veces antes de rendirnos — sin esto la imagen se queda
+    // "pensando" indefinidamente en el chat del agente.
     const metaInfoUrl = `https://graph.facebook.com/v19.0/${mediaId}`;
-    const infoResp = await fetchWithAuth(metaInfoUrl, tenant.wa_token);
-    const info = JSON.parse(infoResp.body);
+    let info;
+    let lastErr;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const infoResp = await fetchWithAuth(metaInfoUrl, tenant.wa_token);
+        info = JSON.parse(infoResp.body);
+        if (info.url) break;
+        lastErr = info;
+      } catch (err) {
+        lastErr = err;
+      }
+      if (attempt < 3) await new Promise(r => setTimeout(r, 1200));
+    }
 
-    if (!info.url) {
-      return res.status(404).json({ error: 'Media no encontrada en Meta', detail: info });
+    if (!info?.url) {
+      return res.status(404).json({ error: 'Media no encontrada en Meta', detail: lastErr });
     }
 
     // 2. Descargar el archivo desde Meta y stream-earlo al cliente
@@ -81,22 +95,30 @@ router.get('/:mediaId', mediaAuth, async (req, res) => {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// Timeout explícito: sin esto, si Meta nunca responde, la petición queda colgada
+// para siempre — Express nunca contesta y el <Image> del móvil nunca dispara
+// onError, así que la imagen se queda "pensando" sin fin.
+const MEDIA_TIMEOUT_MS = 10000;
+
 function fetchWithAuth(url, token) {
   return new Promise((resolve, reject) => {
     const opts = {
       headers: { Authorization: `Bearer ${token}` },
+      timeout: MEDIA_TIMEOUT_MS,
     };
-    https.get(url, opts, (resp) => {
+    const req = https.get(url, opts, (resp) => {
       let body = '';
       resp.on('data', chunk => body += chunk);
       resp.on('end', () => resolve({ status: resp.statusCode, body, headers: resp.headers }));
-    }).on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('Timeout consultando Meta (media info)')));
+    req.on('error', reject);
   });
 }
 
 function streamFile(url, token, res) {
   return new Promise((resolve, reject) => {
-    https.get(url, { headers: { Authorization: `Bearer ${token}` } }, (resp) => {
+    const req = https.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: MEDIA_TIMEOUT_MS }, (resp) => {
       if (resp.statusCode !== 200) {
         reject(new Error(`Meta respondió ${resp.statusCode}`));
         return;
@@ -104,7 +126,9 @@ function streamFile(url, token, res) {
       resp.pipe(res);
       resp.on('end', resolve);
       resp.on('error', reject);
-    }).on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('Timeout descargando media de Meta')));
+    req.on('error', reject);
   });
 }
 

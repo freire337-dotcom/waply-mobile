@@ -31,7 +31,7 @@ const DEFAULT_AUTOMATIONS = [
         type:   'notify_agent',
         config: {
           title:            '🆕 Nuevo lead asignado',
-          message_template: 'Nuevo lead: {{lead.name}} ({{lead.phone}}). Ya recibió mensaje de bienvenida.',
+          message_template: 'Nuevo lead: {{lead.name}} ({{lead.phone}}) — interesado en: {{lead.service}}. Ya recibió mensaje de bienvenida.',
           target:           'assigned',
         },
       },

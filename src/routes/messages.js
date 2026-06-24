@@ -71,11 +71,12 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
     // 2. Enviar mensaje con el media_id
     const waMessageId = await wa.sendMedia(tid, conv.wa_id, mediaType, mediaId, caption);
 
-    // 3. Guardar en BD
+    // 3. Guardar en BD — media_url guarda el media_id de Meta (igual que en mensajes
+    // entrantes) para que el proxy /api/media/:mediaId pueda previsualizarlo en el chat.
     const insert = await db.prepare(`
       INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, status, sender_id)
       VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, 'sent', ?)
-    `).run(tid, req.params.convId, waMessageId || null, mediaType, caption || null, originalname, mimetype, req.agent.id);
+    `).run(tid, req.params.convId, waMessageId || null, mediaType, caption || null, mediaId, mimetype, req.agent.id);
 
     await db.prepare(`
       UPDATE conversations

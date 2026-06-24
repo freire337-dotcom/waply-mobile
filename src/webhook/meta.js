@@ -147,9 +147,16 @@ async function processInboundMessage(msg, value, tenant, io) {
   io.to(`tenant:${tenant.id}`).emit('conversation:updated', fullConv);
   io.to(`conv:${conv.id}`).emit('message:new', newMsg);
 
-  // Push notification al agente asignado
+  // Push notification: al agente asignado, o a todo el equipo si la conversación
+  // todavía no tiene agente (caso típico de un lead nuevo) — sin este fallback
+  // los leads nuevos no generaban ninguna notificación.
   if (fullConv.assigned_to) {
     wa.pushToAgent(tenant.id, fullConv.assigned_to,
+      waName, body_text || `[${type}]`,
+      { conversation_id: String(conv.id), tenant_slug: tenant.slug }
+    ).catch(console.error);
+  } else {
+    wa.broadcastPush(tenant.id,
       waName, body_text || `[${type}]`,
       { conversation_id: String(conv.id), tenant_slug: tenant.slug }
     ).catch(console.error);

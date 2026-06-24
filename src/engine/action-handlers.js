@@ -108,8 +108,20 @@ async function sendWhatsapp({ tenantId, action, context }) {
   }
 
   // Las plantillas no tienen "body" de texto libre (van por components) — sin esto
-  // el mensaje se guarda con body=NULL y aparece en blanco en el inbox de Waply.
-  const displayBody = resolvedBody || (type === 'template' ? `[plantilla: ${template}]` : null);
+  // el mensaje se guarda con body=NULL y aparece en blanco (o solo como
+  // "[plantilla: nombre]") en el inbox de Waply, el CRM y el móvil, sin pista de
+  // qué le preguntamos al lead. Si la automatización pasa parámetros de texto en
+  // components (ej. el servicio que pidió el lead), los mostramos también para
+  // que el agente vea el contenido real sin tener que abrir Meta Business Manager.
+  const paramText = resolvedComponents
+    .flatMap(c => c.parameters || [])
+    .filter(p => p.type === 'text' && p.text)
+    .map(p => p.text)
+    .join(' · ');
+  const displayBody = resolvedBody
+    || (type === 'template'
+      ? `[Plantilla: ${template}]${paramText ? ' ' + paramText : ''}`
+      : null);
 
   // Guardar en historial si hay conversación
   if (context.conversation_id && waMessageId) {
