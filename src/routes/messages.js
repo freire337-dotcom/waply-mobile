@@ -4,6 +4,10 @@ const db      = require('../db');
 const auth    = require('../middleware/auth');
 const wa      = require('../services/whatsapp');
 const { pushToCRM } = require('../services/crm-sync');
+const { convertToOggOpus } = require('../services/audio-convert');
+
+// MIME de audio que la API de WhatsApp acepta tal cual.
+const ALLOWED_AUDIO_MIMES = ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg'];
 
 // Multer en memoria (no guarda en disco, sube directo a Meta)
 const upload = multer({
@@ -61,8 +65,18 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
   if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
 
   try {
-    const { originalname, mimetype, buffer } = req.file;
+    let { originalname, mimetype, buffer } = req.file;
     const caption = req.body.caption || '';
+
+    // WhatsApp solo acepta ciertos MIME de audio. El navegador (WaplyAdmin web)
+    // solo sabe grabar en audio/webm, que Meta rechaza — lo convertimos a
+    // Ogg/Opus (sí soportado) antes de subir. Ver services/audio-convert.js.
+    if (mimetype.startsWith('audio/') && !ALLOWED_AUDIO_MIMES.includes(mimetype)) {
+      buffer = await convertToOggOpus(buffer);
+      mimetype = 'audio/ogg';
+      originalname = originalname.replace(/\.[^.]+$/, '') + '.ogg';
+    }
+
     const mediaType = getMimeMediaType(mimetype);
 
     // 1. Subir a Meta y obtener media_id

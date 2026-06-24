@@ -1,0 +1,5 @@
+# Le pide a Railway (Nixpacks) que instale el binario ffmpeg en el contenedor.
+# Lo usa backend/src/services/audio-convert.js para convertir notas de voz
+# grabadas en el navegador (audio/webm) a un formato que WhatsApp acepta.
+[phases.setup]
+nixPkgs = ["ffmpeg"]
