@@ -91,4 +91,31 @@ export const getMediaUrl = async (mediaId: string) => {
 export const getAgents = () =>
   api.get('/agents').then(r => r.data.agents);
 
+// ── Tareas/recordatorios de conversación ──────────────────────────────────────
+// Ej: "quedamos en llamarle mañana" — recordatorio ligado a un chat, con aviso
+// push automático (backend) cuando vence due_at.
+export interface ConversationTask {
+  id: number;
+  conversation_id: number;
+  agent_id: number | null;
+  agent_name?: string | null;
+  title: string;
+  due_at: string;
+  status: 'pending' | 'done';
+  created_at: string;
+  completed_at?: string | null;
+}
+
+export const getConversationTasks = (convId: number) =>
+  api.get(`/conversations/${convId}/tasks`).then(r => r.data.tasks as ConversationTask[]);
+
+export const createConversationTask = (convId: number, data: { title: string; due_at: string; agent_id?: number }) =>
+  api.post(`/conversations/${convId}/tasks`, data).then(r => r.data.task as ConversationTask);
+
+export const patchTask = (taskId: number, data: { status?: 'pending' | 'done'; title?: string; due_at?: string }) =>
+  api.patch(`/tasks/${taskId}`, data).then(r => r.data.task as ConversationTask);
+
+export const deleteTask = (taskId: number) =>
+  api.delete(`/tasks/${taskId}`).then(r => r.data);
+
 export default api;

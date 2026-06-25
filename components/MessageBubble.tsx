@@ -26,6 +26,19 @@ const ICONS: Record<string, string> = {
   video: '🎬',
 };
 
+const URL_SPLIT_RE = /((?:https?:\/\/|www\.)[^\s]+)/gi;
+const URL_TEST_RE  = /^(?:https?:\/\/|www\.)/i;
+
+// Divide el texto en partes normales y enlaces, para poder pintar los
+// enlaces como texto tocable (abre en el navegador in-app) sin perder
+// la selección/copia nativa del resto del mensaje.
+function linkify(text: string): { text: string; isLink: boolean }[] {
+  if (!text) return [{ text: '', isLink: false }];
+  return text.split(URL_SPLIT_RE)
+    .filter(p => p !== '')
+    .map(p => ({ text: p, isLink: URL_TEST_RE.test(p) }));
+}
+
 export default function MessageBubble({ message: m }: Props) {
   const isOut = m.direction === 'outbound';
   const parsedDate = m.created_at ? new Date(m.created_at + 'Z') : null;
@@ -163,8 +176,23 @@ export default function MessageBubble({ message: m }: Props) {
         {/* Mensajes de plantilla ('template') no tenían rama de render — quedaban
             visualmente vacíos (solo hora + check), aunque sí traían body guardado. */}
         {(m.type === 'text' || m.type === 'template') && (
-          <Text style={[styles.body, isOut ? styles.bodyOut : styles.bodyIn]}>
-            {m.body}
+          <Text selectable style={[styles.body, isOut ? styles.bodyOut : styles.bodyIn]}>
+            {linkify(m.body || '').map((part, i) =>
+              part.isLink ? (
+                <Text
+                  key={i}
+                  style={styles.link}
+                  onPress={() => {
+                    const url = part.text.match(/^https?:\/\//i) ? part.text : `https://${part.text}`;
+                    WebBrowser.openBrowserAsync(url).catch(() => {});
+                  }}
+                >
+                  {part.text}
+                </Text>
+              ) : (
+                <Text key={i}>{part.text}</Text>
+              )
+            )}
           </Text>
         )}
 
@@ -234,7 +262,7 @@ export default function MessageBubble({ message: m }: Props) {
         )}
 
         {isImage && m.body && (
-          <Text style={[styles.body, styles.caption]}>{m.body}</Text>
+          <Text selectable style={[styles.body, styles.caption]}>{m.body}</Text>
         )}
 
         <View style={styles.meta}>
@@ -303,6 +331,7 @@ const styles = StyleSheet.create({
   bodyIn:  { color: '#111' },
   bodyOut: { color: '#111' },
   caption: { color: '#111', marginTop: 4 },
+  link: { color: '#1565C0', textDecorationLine: 'underline' },
 
   image: {
     width: 220,

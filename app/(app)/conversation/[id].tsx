@@ -9,9 +9,12 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import { format } from 'date-fns';
 import {
   getConversation, getMessages, sendMessage, sendMedia,
   patchConversation, getAgents, PIPELINE_STAGES,
+  getConversationTasks, createConversationTask, patchTask, deleteTask,
+  ConversationTask,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -36,6 +39,13 @@ export default function ConversationScreen() {
   const [isRecording, setIsRecording]   = useState(false);
   const [recSeconds, setRecSeconds]     = useState(0);
 
+  // Recordatorios/tareas ligados a esta conversación (ej. "llamar mañana")
+  const [tasks, setTasks]               = useState<ConversationTask[]>([]);
+  const [showTasks, setShowTasks]       = useState(false);
+  const [showNewTask, setShowNewTask]   = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [savingTask, setSavingTask]     = useState(false);
+
   const flatRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -43,12 +53,14 @@ export default function ConversationScreen() {
   // Cargar conversación y mensajes
   const load = useCallback(async () => {
     try {
-      const [conv, msgs] = await Promise.all([
+      const [conv, msgs, taskList] = await Promise.all([
         getConversation(convId),
         getMessages(convId),
+        getConversationTasks(convId).catch(() => []),
       ]);
       setConversation(conv);
       setMessages(msgs.messages);
+      setTasks(taskList);
       navigation.setOptions({ title: conv.contact_name || conv.wa_id });
     } catch (err) {
       console.error('Error cargando conversación:', err);
@@ -153,6 +165,53 @@ export default function ConversationScreen() {
     const data = await getAgents();
     setAgents(data);
     setShowAssign(true);
+  };
+
+  // ── Recordatorios de conversación ("quedamos en llamarle mañana") ────────────
+  const pendingTasksCount = tasks.filter(t => t.status === 'pending').length;
+
+  // Atajos de fecha: cubren los casos típicos sin necesitar un date picker nativo.
+  const taskPresets: { label: string; getDate: () => Date }[] = [
+    { label: 'En 1 hora',       getDate: () => new Date(Date.now() + 60 * 60 * 1000) },
+    { label: 'En 3 horas',      getDate: () => new Date(Date.now() + 3 * 60 * 60 * 1000) },
+    { label: 'Hoy a las 18:00', getDate: () => { const d = new Date(); d.setHours(18, 0, 0, 0); return d; } },
+    { label: 'Mañana 9:00',     getDate: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; } },
+    { label: 'Mañana 17:00',    getDate: () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(17, 0, 0, 0); return d; } },
+  ];
+
+  const handleCreateTask = async (dueDate: Date) => {
+    const title = newTaskTitle.trim();
+    if (!title || savingTask) return;
+    setSavingTask(true);
+    try {
+      const task = await createConversationTask(convId, { title, due_at: dueDate.toISOString() });
+      setTasks(prev => [...prev, task]);
+      setNewTaskTitle('');
+      setShowNewTask(false);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error || 'No se pudo crear el recordatorio');
+    } finally {
+      setSavingTask(false);
+    }
+  };
+
+  const handleToggleTaskDone = async (task: ConversationTask) => {
+    const newStatus = task.status === 'done' ? 'pending' : 'done';
+    try {
+      const updated = await patchTask(task.id, { status: newStatus });
+      setTasks(prev => prev.map(t => (t.id === task.id ? updated : t)));
+    } catch {
+      Alert.alert('Error', 'No se pudo actualizar el recordatorio');
+    }
+  };
+
+  const handleDeleteTask = async (task: ConversationTask) => {
+    try {
+      await deleteTask(task.id);
+      setTasks(prev => prev.filter(t => t.id !== task.id));
+    } catch {
+      Alert.alert('Error', 'No se pudo eliminar el recordatorio');
+    }
   };
 
   // Subir y enviar un archivo (foto/video/documento) ya seleccionado
@@ -288,6 +347,11 @@ export default function ConversationScreen() {
             <TouchableOpacity style={styles.actionBtn} onPress={openAssignModal}>
               <Text style={styles.actionBtnText}>
                 {conversation.agent_name ? `👤 ${conversation.agent_name.split(' ')[0]}` : '+ Asignar'}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => setShowTasks(true)}>
+              <Text style={styles.actionBtnText}>
+                🔔{pendingTasksCount > 0 ? ` ${pendingTasksCount}` : ''}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
@@ -431,6 +495,79 @@ export default function ConversationScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Modal recordatorios/tareas */}
+      <Modal visible={showTasks} transparent animationType="slide" onRequestClose={() => setShowTasks(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Recordatorios</Text>
+            <ScrollView style={{ maxHeight: 300 }}>
+              {tasks.length === 0 && !showNewTask && (
+                <Text style={styles.emptyTasksText}>Sin recordatorios todavía</Text>
+              )}
+              {tasks
+                .slice()
+                .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || new Date(a.due_at).getTime() - new Date(b.due_at).getTime())
+                .map(task => (
+                  <View key={task.id} style={styles.taskRow}>
+                    <TouchableOpacity style={styles.taskCheck} onPress={() => handleToggleTaskDone(task)}>
+                      <Ionicons
+                        name={task.status === 'done' ? 'checkmark-circle' : 'ellipse-outline'}
+                        size={22}
+                        color={task.status === 'done' ? '#25D366' : '#aaa'}
+                      />
+                    </TouchableOpacity>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.taskTitle, task.status === 'done' && styles.taskTitleDone]}>
+                        {task.title}
+                      </Text>
+                      <Text style={styles.taskDue}>{format(new Date(task.due_at), "d MMM, HH:mm")}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => handleDeleteTask(task)} style={{ padding: 4 }}>
+                      <Ionicons name="trash-outline" size={18} color="#c00" />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+            </ScrollView>
+
+            {showNewTask ? (
+              <View style={styles.newTaskBox}>
+                <TextInput
+                  style={styles.newTaskInput}
+                  placeholder="Ej: Llamar para confirmar la cita"
+                  placeholderTextColor="#aaa"
+                  value={newTaskTitle}
+                  onChangeText={setNewTaskTitle}
+                  autoFocus
+                />
+                <View style={styles.presetsRow}>
+                  {taskPresets.map(p => (
+                    <TouchableOpacity
+                      key={p.label}
+                      style={[styles.presetChip, (!newTaskTitle.trim() || savingTask) && { opacity: 0.5 }]}
+                      disabled={!newTaskTitle.trim() || savingTask}
+                      onPress={() => handleCreateTask(p.getDate())}
+                    >
+                      <Text style={styles.presetChipText}>{p.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity onPress={() => { setShowNewTask(false); setNewTaskTitle(''); }}>
+                  <Text style={[styles.modalCloseText, { textAlign: 'center', marginTop: 8 }]}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.newTaskBtn} onPress={() => setShowNewTask(true)}>
+                <Text style={styles.newTaskBtnText}>+ Nuevo recordatorio</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity style={styles.modalClose} onPress={() => { setShowTasks(false); setShowNewTask(false); }}>
+              <Text style={styles.modalCloseText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Modal asignación */}
@@ -638,4 +775,55 @@ const styles = StyleSheet.create({
     borderTopColor: '#e0e0e0',
   },
   modalCloseText: { color: '#e53e3e', fontSize: 15, fontWeight: '600' },
+
+  emptyTasksText: { textAlign: 'center', color: '#888', paddingVertical: 24, fontSize: 14 },
+  taskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    gap: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f0f0f0',
+  },
+  taskCheck:      { padding: 2 },
+  taskTitle:      { fontSize: 15, color: '#111', fontWeight: '500' },
+  taskTitleDone:  { color: '#999', textDecorationLine: 'line-through' },
+  taskDue:        { fontSize: 12, color: '#888', marginTop: 2 },
+
+  newTaskBtn: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e0e0e0',
+  },
+  newTaskBtnText: { color: '#128C7E', fontSize: 15, fontWeight: '600' },
+
+  newTaskBox: {
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e0e0e0',
+  },
+  newTaskInput: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#111',
+  },
+  presetsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  presetChip: {
+    backgroundColor: '#e8f5e9',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 14,
+  },
+  presetChipText: { color: '#128C7E', fontSize: 13, fontWeight: '600' },
 });
