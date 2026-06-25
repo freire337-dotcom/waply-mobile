@@ -44,6 +44,16 @@ router.get('/api/releases/latest', async (req, res) => {
   res.json(release);
 });
 
+// ── GET /download/redirect ────────────────────────────────────────────────────
+// 302 directo a la URL del APK (sin página intermedia) — para el botón/icono
+// de la home en Lovable, así el clic dispara la descarga al instante.
+router.get('/download/redirect', async (req, res) => {
+  const platform = req.query.platform || 'android';
+  const release  = await db.prepare('SELECT * FROM app_releases WHERE platform = ?').get(platform);
+  if (!release) return res.redirect('/download');
+  res.redirect(302, release.url);
+});
+
 // ── GET /download ──────────────────────────────────────────────────────────────
 // Página pública con botón de descarga. Siempre apunta al último build.
 router.get('/download', async (req, res) => {
