@@ -161,6 +161,15 @@ async function initSchema() {
       UNIQUE(tenant_id, crm_appointment_id)
     );
 
+    CREATE TABLE IF NOT EXISTS app_releases (
+      id          SERIAL PRIMARY KEY,
+      platform    TEXT    NOT NULL UNIQUE,
+      profile     TEXT    NOT NULL,
+      version     TEXT,
+      url         TEXT    NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS agent_limit INTEGER;
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pipeline_stage TEXT NOT NULL DEFAULT 'abierto';
 
