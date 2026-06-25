@@ -161,6 +161,20 @@ async function initSchema() {
       UNIQUE(tenant_id, crm_appointment_id)
     );
 
+    CREATE TABLE IF NOT EXISTS conversation_tasks (
+      id              SERIAL PRIMARY KEY,
+      tenant_id       INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      agent_id        INTEGER REFERENCES agents(id),
+      title           TEXT    NOT NULL,
+      due_at          TIMESTAMPTZ NOT NULL,
+      status          TEXT    NOT NULL DEFAULT 'pending',
+      reminder_sent   INTEGER NOT NULL DEFAULT 0,
+      created_by      INTEGER REFERENCES agents(id),
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      completed_at    TIMESTAMPTZ
+    );
+
     CREATE TABLE IF NOT EXISTS app_releases (
       id          SERIAL PRIMARY KEY,
       platform    TEXT    NOT NULL UNIQUE,
@@ -178,6 +192,8 @@ async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);
     CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(tenant_id, scheduled_at, status);
     CREATE INDEX IF NOT EXISTS idx_contacts_tenant   ON contacts(tenant_id, wa_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_conv        ON conversation_tasks(conversation_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_due         ON conversation_tasks(status, reminder_sent, due_at);
   `);
   console.log('✅ Schema PostgreSQL inicializado');
 }

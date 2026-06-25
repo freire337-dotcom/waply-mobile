@@ -19,6 +19,7 @@ const automationsRoutes   = require('./routes/automations');
 const mediaRoutes         = require('./routes/media');
 const triggersRoutes      = require('./triggers/index');
 const releasesRoutes      = require('./routes/releases');
+const tasksRoutes         = require('./routes/tasks');
 const metaWebhook         = require('./webhook/meta');
 const { startCronJobs }   = require('./engine/cron');
 const { setIO }           = require('./io');
@@ -46,6 +47,7 @@ app.use('/api/tenants',       tenantsRoutes);
 app.use('/api/automations',   automationsRoutes);
 app.use('/api/media',         mediaRoutes);
 app.use('/api/triggers',      triggersRoutes);
+app.use('/api',               tasksRoutes);
 app.use('/',                  releasesRoutes);
 app.use('/webhook/meta',      metaWebhook);
 

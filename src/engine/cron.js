@@ -7,8 +7,9 @@
  * Usa setInterval en lugar de dependencias externas para mantener el proyecto simple.
  */
 
-const db     = require('../db');
-const engine = require('./automation-engine');
+const db       = require('../db');
+const engine   = require('./automation-engine');
+const whatsapp = require('../services/whatsapp');
 
 // ── Utilidades de tiempo ──────────────────────────────────────────────────────
 function startOfDay(date) {
@@ -104,6 +105,38 @@ async function checkExpiredTimers() {
   }
 }
 
+// ── Job 3: Recordatorios de tareas de conversación ────────────────────────────
+// Tareas tipo "quedamos en llamarle mañana": cuando due_at vence, avisa por
+// push al agente asignado. No se marca 'done' sola — el agente la cierra a mano;
+// solo se evita reenviar el push una vez disparado (reminder_sent).
+async function checkConversationTasks() {
+  const due = await db.prepare(`
+    SELECT t.*, ct.name AS contact_name
+    FROM conversation_tasks t
+    JOIN conversations c ON c.id = t.conversation_id
+    JOIN contacts ct     ON ct.id = c.contact_id
+    WHERE t.status = 'pending' AND t.reminder_sent = 0 AND t.due_at <= NOW()
+  `).all();
+
+  for (const task of due) {
+    try {
+      if (task.agent_id) {
+        await whatsapp.pushToAgent(
+          task.tenant_id,
+          task.agent_id,
+          '⏰ Recordatorio',
+          `${task.title}${task.contact_name ? ` — ${task.contact_name}` : ''}`,
+          { type: 'conversation_task', conversation_id: task.conversation_id, task_id: task.id }
+        );
+      }
+      await db.prepare('UPDATE conversation_tasks SET reminder_sent = 1 WHERE id = ?').run(task.id);
+      console.log(`  ✅ Recordatorio de tarea enviado: #${task.id}`);
+    } catch (err) {
+      console.error(`  ❌ Error recordatorio tarea #${task.id}:`, err.message);
+    }
+  }
+}
+
 // ── Calcular ms hasta la próxima hora objetivo ────────────────────────────────
 function msUntilHour(hour, minute = 0) {
   const now  = new Date();
@@ -129,12 +162,17 @@ function startCronJobs() {
   // Job 2: cada 15 minutos
   setInterval(() => checkExpiredTimers().catch(console.error), 15 * 60 * 1000);
 
+  // Job 3: cada 5 minutos (recordatorios de tareas — necesitan más granularidad
+  // porque el agente fija la hora exacta, ej. "llamar a las 11:30")
+  setInterval(() => checkConversationTasks().catch(console.error), 5 * 60 * 1000);
+
   // Ejecutar inmediatamente al arrancar (para dev)
   if (process.env.NODE_ENV !== 'production') {
     checkExpiredTimers().catch(console.error);
+    checkConversationTasks().catch(console.error);
   }
 
   console.log('✅ Cron jobs iniciados');
 }
 
-module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers };
+module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers, checkConversationTasks };
