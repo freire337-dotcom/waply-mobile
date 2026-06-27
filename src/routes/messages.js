@@ -177,4 +177,61 @@ router.post('/:convId/messages', auth, async (req, res) => {
   }
 });
 
+// PATCH /api/messages/:id — editar texto de un mensaje saliente (solo admin)
+router.patch('/:id', auth, async (req, res) => {
+  try {
+    if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Solo un administrador puede editar mensajes' });
+    const { body } = req.body;
+    if (!body || !body.trim()) return res.status(400).json({ error: 'body requerido' });
+    const tid = req.agent.tenant_id;
+
+    const msg = await db.prepare(`
+      SELECT m.* FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND c.tenant_id = ?
+    `).get(req.params.id, tid);
+    if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
+    if (msg.direction !== 'outbound' || (msg.type && msg.type !== 'text')) {
+      return res.status(400).json({ error: 'Solo se pueden editar mensajes de texto salientes' });
+    }
+
+    await db.prepare('UPDATE messages SET body = ?, edited = true WHERE id = ?').run(body.trim(), msg.id);
+
+    const updated = await db.prepare(`
+      SELECT m.*, a.name AS sender_name FROM messages m
+      LEFT JOIN agents a ON a.id = m.sender_id
+      WHERE m.id = ?
+    `).get(msg.id);
+
+    req.app.get('io').to(`conv:${msg.conversation_id}`).emit('message:updated', updated);
+    res.json({ message: updated });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
+// DELETE /api/messages/:id — borrar un mensaje del historial (solo admin)
+router.delete('/:id', auth, async (req, res) => {
+  try {
+    if (req.agent.role !== 'admin') return res.status(403).json({ error: 'Solo un administrador puede eliminar mensajes' });
+    const tid = req.agent.tenant_id;
+
+    const msg = await db.prepare(`
+      SELECT m.* FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND c.tenant_id = ?
+    `).get(req.params.id, tid);
+    if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
+
+    await db.prepare('DELETE FROM messages WHERE id = ?').run(msg.id);
+
+    req.app.get('io').to(`conv:${msg.conversation_id}`).emit('message:deleted', { id: msg.id, conversation_id: msg.conversation_id });
+    res.status(204).end();
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
+
 module.exports = router;

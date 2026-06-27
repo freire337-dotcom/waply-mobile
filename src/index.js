@@ -42,6 +42,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/api/auth',          authRoutes);
 app.use('/api/conversations', conversationsRoutes);
 app.use('/api/conversations', messagesRoutes);
+app.use('/api/messages',      messagesRoutes); // PATCH/DELETE /api/messages/:id (editar/eliminar mensaje)
 app.use('/api/agents',        agentsRoutes);
 app.use('/api/tenants',       tenantsRoutes);
 app.use('/api/automations',   automationsRoutes);

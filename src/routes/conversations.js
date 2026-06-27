@@ -95,14 +95,36 @@ router.get('/:id', auth, async (req, res) => {
 // PATCH /api/conversations/:id
 router.patch('/:id', auth, async (req, res) => {
   try {
-    const { assigned_to, status, unread_count, pipeline_stage } = req.body;
+    let { assigned_to, status, unread_count, pipeline_stage } = req.body;
     const tid = req.agent.tenant_id;
 
-    const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
+    const conv = await db.prepare('SELECT id, status, pipeline_stage FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.id, tid);
     if (!conv) return res.status(404).json({ error: 'No encontrada' });
 
     if (pipeline_stage !== undefined && !PIPELINE_STAGES.includes(pipeline_stage))
       return res.status(400).json({ error: `Etapa inválida. Usa una de: ${PIPELINE_STAGES.join(', ')}` });
+
+    // Sincronía automática entre el status de la conversación (pestañas Abiertas/
+    // Pendientes/Cerradas) y la etapa del Pipeline — son dos vistas del mismo avance,
+    // así que mover una mueve la otra. Solo se deriva cuando el cliente manda un
+    // campo sin el otro; si manda los dos explícitamente, se respetan tal cual.
+    if (status && pipeline_stage === undefined) {
+      if (status === 'pending') {
+        pipeline_stage = 'pendiente';
+      } else if (status === 'closed' && !['venta_cerrada', 'venta_perdida'].includes(conv.pipeline_stage)) {
+        pipeline_stage = 'venta_cerrada';
+      } else if (status === 'open' && ['pendiente', 'venta_cerrada', 'venta_perdida'].includes(conv.pipeline_stage)) {
+        pipeline_stage = conv.pipeline_stage === 'pendiente' ? 'contactado' : 'negociacion';
+      }
+    } else if (pipeline_stage !== undefined && status === undefined) {
+      if (pipeline_stage === 'pendiente') {
+        status = 'pending';
+      } else if (['venta_cerrada', 'venta_perdida'].includes(pipeline_stage)) {
+        status = 'closed';
+      } else if (['abierto', 'contactado', 'negociacion'].includes(pipeline_stage) && conv.status !== 'open') {
+        status = 'open';
+      }
+    }
 
     if (assigned_to !== undefined)
       await db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ?').run(assigned_to || null, req.params.id);
