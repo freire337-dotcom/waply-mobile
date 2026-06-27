@@ -2,9 +2,57 @@ const router = require('express').Router();
 const db     = require('../db');
 const auth   = require('../middleware/auth');
 const { pushStatusToCRM } = require('../services/crm-sync');
+const { normalizePhone } = require('../utils/phone');
 
 // Etapas válidas del pipeline de ventas (campo independiente de c.status)
 const PIPELINE_STAGES = ['abierto', 'contactado', 'negociacion', 'pendiente', 'venta_cerrada', 'venta_perdida'];
+
+// POST /api/conversations — alta manual de contacto/conversación.
+// Para leads que nunca llegaron solos (p.ej. rellenaron el formulario del anuncio
+// pero no llegaron a escribir por WhatsApp, o el webhook que los traía falló) y
+// el agente quiere darlos de alta a mano con el teléfono que sí tiene del CRM/anuncio.
+router.post('/', auth, async (req, res) => {
+  try {
+    const { name, phone } = req.body;
+    if (!phone || !String(phone).trim()) return res.status(400).json({ error: 'Teléfono requerido' });
+    const tid  = req.agent.tenant_id;
+    const waId = normalizePhone(phone);
+    if (!waId) return res.status(400).json({ error: 'Teléfono no válido' });
+
+    await db.prepare(`
+      INSERT INTO contacts (tenant_id, wa_id, name, phone)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, contacts.name)
+    `).run(tid, waId, name || null, phone);
+
+    const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
+
+    let conv = await db.prepare('SELECT * FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tid, contact.id);
+    if (!conv) {
+      const ins = await db.prepare(`
+        INSERT INTO conversations (tenant_id, contact_id, status)
+        VALUES (?, ?, 'open')
+      `).run(tid, contact.id);
+      conv = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(ins.lastInsertRowid);
+    }
+
+    const full = await db.prepare(`
+      SELECT c.id, c.status, c.pipeline_stage, c.unread_count, c.last_message, c.last_msg_at, c.lead_id,
+             ct.id AS contact_id, ct.name AS contact_name, ct.wa_id, ct.phone,
+             a.id  AS agent_id,   a.name  AS agent_name
+      FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      LEFT JOIN agents a ON a.id = c.assigned_to
+      WHERE c.id = ?
+    `).get(conv.id);
+
+    req.app.get('io').to(`tenant:${tid}`).emit('conversation:updated', full);
+    res.status(201).json({ conversation: full });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Error interno' });
+  }
+});
 
 // GET /api/conversations/pipeline — vista Kanban: todas las conversaciones del tenant agrupables por etapa
 // (debe ir ANTES de GET /:id para que Express no confunda "pipeline" con un :id)
