@@ -113,7 +113,9 @@ router.patch('/:id', auth, async (req, res) => {
       if (status === 'pending') {
         pipeline_stage = 'pendiente';
       } else if (status === 'closed' && !['venta_cerrada', 'venta_perdida'].includes(conv.pipeline_stage)) {
-        pipeline_stage = 'venta_cerrada';
+        // Cerrar un chat normalmente significa que no se concretó la venta — si fue
+        // una venta ganada, el agente lo mueve a mano a "venta_cerrada" en el Pipeline.
+        pipeline_stage = 'venta_perdida';
       } else if (status === 'open' && ['pendiente', 'venta_cerrada', 'venta_perdida'].includes(conv.pipeline_stage)) {
         pipeline_stage = conv.pipeline_stage === 'pendiente' ? 'contactado' : 'negociacion';
       }
@@ -137,7 +139,7 @@ router.patch('/:id', auth, async (req, res) => {
       await db.prepare('UPDATE conversations SET pipeline_stage = ? WHERE id = ?').run(pipeline_stage, req.params.id);
 
     const updated = await db.prepare(`
-      SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
+      SELECT c.*, ct.name AS contact_name, ct.wa_id, a.id AS agent_id, a.name AS agent_name
       FROM conversations c
       JOIN contacts ct ON ct.id = c.contact_id
       LEFT JOIN agents a ON a.id = c.assigned_to

@@ -92,9 +92,12 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
       VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, 'sent', ?)
     `).run(tid, req.params.convId, waMessageId || null, mediaType, caption || null, mediaId, mimetype, req.agent.id);
 
+    // Si el lead seguía "abierto" (sin contactar) en el Pipeline y ahora le respondimos,
+    // pasa automáticamente a "contactado" — ya hubo respuesta de nuestro lado.
+    const pipelineSetMedia = conv.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'
+      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetMedia}
       WHERE id = ?
     `).run(`[${mediaType}] ${originalname}`, req.params.convId);
 
@@ -143,9 +146,12 @@ router.post('/:convId/messages', auth, async (req, res) => {
       VALUES (?, ?, ?, 'outbound', ?, ?, 'sent', ?)
     `).run(tid, req.params.convId, waMessageId || null, type, body || null, req.agent.id);
 
+    // Si el lead seguía "abierto" (sin contactar) en el Pipeline y ahora le respondimos,
+    // pasa automáticamente a "contactado" — ya hubo respuesta de nuestro lado.
+    const pipelineSetText = conv.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'
+      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetText}
       WHERE id = ?
     `).run(body || `[${type}]`, req.params.convId);
 
