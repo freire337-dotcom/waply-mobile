@@ -66,4 +66,52 @@ async function pushToCRM({ tenantId, convId, direction, phone, contactName, lead
   }
 }
 
-module.exports = { pushToCRM };
+/**
+ * Notifica al CRM de un cambio de estado de la conversación (abierta/pendiente/
+ * resuelta) — sin esto, cerrar o marcar pendiente un chat en Waply no se refleja
+ * en whatsapp_conversations del CRM y se queda desincronizado.
+ *
+ * @param {object} params
+ * @param {number} params.tenantId
+ * @param {number} params.convId
+ * @param {string} params.phone     - wa_id del contacto
+ * @param {number|null} params.leadId
+ * @param {'open'|'pending'|'closed'} params.status
+ */
+async function pushStatusToCRM({ tenantId, convId, phone, leadId, status }) {
+  if (!CRM_WEBHOOK_SECRET) {
+    console.warn('[crm-sync] CRM_WEBHOOK_SECRET no configurado — sync de estado desactivado');
+    return;
+  }
+  if (!phone || !status) return;
+
+  const payload = {
+    event:           'status',
+    tenant_id:       tenantId,
+    conversation_id: convId,
+    phone,
+    lead_id:         leadId || null,
+    status,
+  };
+
+  try {
+    const res = await fetch(CRM_WEBHOOK_URL, {
+      method:  'POST',
+      headers: {
+        'Content-Type':    'application/json',
+        'x-waply-secret':  CRM_WEBHOOK_SECRET,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.warn(`[crm-sync] Fallo al sincronizar estado con CRM: ${res.status} ${err}`);
+    } else {
+      console.log(`[crm-sync] ✅ Estado sincronizado con CRM: conv=${convId} phone=${phone} status=${status}`);
+    }
+  } catch (e) {
+    console.warn('[crm-sync] Error de red al sincronizar estado con CRM:', e.message);
+  }
+}
+
+module.exports = { pushToCRM, pushStatusToCRM };

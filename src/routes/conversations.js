@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const db     = require('../db');
 const auth   = require('../middleware/auth');
+const { pushStatusToCRM } = require('../services/crm-sync');
 
 // Etapas válidas del pipeline de ventas (campo independiente de c.status)
 const PIPELINE_STAGES = ['abierto', 'contactado', 'negociacion', 'pendiente', 'venta_cerrada', 'venta_perdida'];
@@ -145,6 +146,18 @@ router.patch('/:id', auth, async (req, res) => {
 
     req.app.get('io').to(`tenant:${tid}`).emit('conversation:updated', updated);
     res.json({ conversation: updated });
+
+    // Sincronizar el nuevo estado con el CRM (Supabase) — si no se hace, cerrar/
+    // marcar pendiente un chat en Waply no se refleja allí (queda desincronizado).
+    if (status) {
+      pushStatusToCRM({
+        tenantId: tid,
+        convId:   updated.id,
+        phone:    updated.wa_id,
+        leadId:   updated.lead_id || null,
+        status,
+      });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Error interno' });
