@@ -126,10 +126,11 @@ async function processInboundMessage(msg, value, tenant, io) {
     VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, 'received')
   `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime);
 
-  // Actualizar conversación
+  // Actualizar conversación. followup_24h_sent = false: el contacto acaba de
+  // responder, así que el ciclo de "sin respuesta 24h" se reinicia.
   await db.prepare(`
     UPDATE conversations
-    SET last_message = ?, last_msg_at = NOW(), unread_count = unread_count + 1, status = 'open'
+    SET last_message = ?, last_msg_at = NOW(), unread_count = unread_count + 1, status = 'open', followup_24h_sent = false
     WHERE id = ?
   `).run(body_text || `[${type}]`, conv.id);
 

@@ -142,9 +142,11 @@ async function sendWhatsapp({ tenantId, action, context }) {
     ).get(context.conversation_id, tenantId);
     const pipelineSetAuto = convBefore?.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
 
+    // followup_24h_sent = false: este envío automático también reinicia el ciclo
+    // de "sin respuesta 24h" (incluye el propio mensaje de seguimiento de ese trigger).
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetAuto}
+      SET last_message = ?, last_msg_at = NOW(), status = 'open', followup_24h_sent = false${pipelineSetAuto}
       WHERE id = ? AND tenant_id = ?
     `).run(displayBody || `[${type}]`, context.conversation_id, tenantId);
 

@@ -56,7 +56,7 @@ router.post('/', auth, async (req, res) => {
     const VALID_TRIGGERS = [
       'lead.created', 'lead.updated',
       'appointment.scheduled', 'appointment.reminder_7d', 'appointment.reminder_1d',
-      'message.received',
+      'message.received', 'conversation.no_response_24h',
     ];
     if (!VALID_TRIGGERS.includes(trigger)) {
       return res.status(400).json({ error: `Trigger inválido. Válidos: ${VALID_TRIGGERS.join(', ')}` });

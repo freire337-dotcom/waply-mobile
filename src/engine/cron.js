@@ -137,6 +137,42 @@ async function checkConversationTasks() {
   }
 }
 
+// ── Job 4: Sin respuesta en 24h ───────────────────────────────────────────────
+// Busca conversaciones abiertas cuyo último mensaje lo mandamos nosotros (outbound)
+// y lleva 24h+ sin que el contacto responda. Dispara 'conversation.no_response_24h'
+// una sola vez por ciclo — followup_24h_sent se resetea a false en cuanto entra
+// o sale un mensaje nuevo (ver routes/messages.js, webhook/meta.js, action-handlers.js),
+// así que si el contacto responde o le volvemos a escribir, el ciclo se reinicia.
+async function checkNoResponse24h() {
+  const rows = await db.prepare(`
+    SELECT c.id AS conversation_id, c.tenant_id, c.lead_id,
+           ct.id AS contact_id, ct.wa_id, ct.name AS contact_name
+    FROM conversations c
+    JOIN contacts ct ON ct.id = c.contact_id
+    JOIN LATERAL (
+      SELECT direction FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+    ) lm ON true
+    WHERE c.status = 'open'
+      AND c.followup_24h_sent = false
+      AND c.last_msg_at <= NOW() - INTERVAL '24 hours'
+      AND lm.direction = 'outbound'
+  `).all();
+
+  for (const row of rows) {
+    try {
+      await engine.fire('conversation.no_response_24h', row.tenant_id, {
+        contact:         { id: row.contact_id, wa_id: row.wa_id, name: row.contact_name },
+        conversation_id: row.conversation_id,
+        lead_id:         row.lead_id,
+      });
+      await db.prepare('UPDATE conversations SET followup_24h_sent = true WHERE id = ?').run(row.conversation_id);
+      console.log(`  ✅ Trigger "sin respuesta 24h" disparado: conversación #${row.conversation_id}`);
+    } catch (err) {
+      console.error(`  ❌ Error en trigger sin respuesta 24h conv #${row.conversation_id}:`, err.message);
+    }
+  }
+}
+
 // ── Calcular ms hasta la próxima hora objetivo ────────────────────────────────
 function msUntilHour(hour, minute = 0) {
   const now  = new Date();
@@ -166,13 +202,17 @@ function startCronJobs() {
   // porque el agente fija la hora exacta, ej. "llamar a las 11:30")
   setInterval(() => checkConversationTasks().catch(console.error), 5 * 60 * 1000);
 
+  // Job 4: cada 30 minutos (sin respuesta en 24h)
+  setInterval(() => checkNoResponse24h().catch(console.error), 30 * 60 * 1000);
+
   // Ejecutar inmediatamente al arrancar (para dev)
   if (process.env.NODE_ENV !== 'production') {
     checkExpiredTimers().catch(console.error);
     checkConversationTasks().catch(console.error);
+    checkNoResponse24h().catch(console.error);
   }
 
   console.log('✅ Cron jobs iniciados');
 }
 
-module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers, checkConversationTasks };
+module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers, checkConversationTasks, checkNoResponse24h };

@@ -94,10 +94,12 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
 
     // Si el lead seguía "abierto" (sin contactar) en el Pipeline y ahora le respondimos,
     // pasa automáticamente a "contactado" — ya hubo respuesta de nuestro lado.
+    // followup_24h_sent = false: le acabamos de escribir, el ciclo "sin respuesta 24h"
+    // se reinicia desde este mensaje.
     const pipelineSetMedia = conv.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetMedia}
+      SET last_message = ?, last_msg_at = NOW(), status = 'open', followup_24h_sent = false${pipelineSetMedia}
       WHERE id = ?
     `).run(`[${mediaType}] ${originalname}`, req.params.convId);
 
@@ -148,10 +150,12 @@ router.post('/:convId/messages', auth, async (req, res) => {
 
     // Si el lead seguía "abierto" (sin contactar) en el Pipeline y ahora le respondimos,
     // pasa automáticamente a "contactado" — ya hubo respuesta de nuestro lado.
+    // followup_24h_sent = false: le acabamos de escribir, el ciclo "sin respuesta 24h"
+    // se reinicia desde este mensaje.
     const pipelineSetText = conv.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetText}
+      SET last_message = ?, last_msg_at = NOW(), status = 'open', followup_24h_sent = false${pipelineSetText}
       WHERE id = ?
     `).run(body || `[${type}]`, req.params.convId);
 

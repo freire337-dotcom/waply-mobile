@@ -187,6 +187,9 @@ async function initSchema() {
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS agent_limit INTEGER;
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pipeline_stage TEXT NOT NULL DEFAULT 'abierto';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT false;
+    -- Evita re-disparar el trigger "sin respuesta 24h" en cada pasada del cron;
+    -- se resetea a false en cuanto entra o sale un mensaje nuevo en la conversación.
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS followup_24h_sent BOOLEAN NOT NULL DEFAULT false;
 
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
