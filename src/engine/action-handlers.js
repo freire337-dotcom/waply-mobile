@@ -135,9 +135,16 @@ async function sendWhatsapp({ tenantId, action, context }) {
     // actualizar la conversación, emitir en tiempo real y sincronizar con el CRM.
     // Sin esto el mensaje queda guardado en BD pero invisible en el inbox en vivo
     // (no sube al tope de la lista y el agente no recibe el evento de socket).
+    // Mismo auto-avance que en routes/messages.js: si el lead seguía "abierto" (sin
+    // contactar) y la automatización le acaba de responder, pasa a "contactado".
+    const convBefore = await db.prepare(
+      'SELECT pipeline_stage FROM conversations WHERE id = ? AND tenant_id = ?'
+    ).get(context.conversation_id, tenantId);
+    const pipelineSetAuto = convBefore?.pipeline_stage === 'abierto' ? `, pipeline_stage = 'contactado'` : '';
+
     await db.prepare(`
       UPDATE conversations
-      SET last_message = ?, last_msg_at = NOW(), status = 'open'
+      SET last_message = ?, last_msg_at = NOW(), status = 'open'${pipelineSetAuto}
       WHERE id = ? AND tenant_id = ?
     `).run(displayBody || `[${type}]`, context.conversation_id, tenantId);
 
