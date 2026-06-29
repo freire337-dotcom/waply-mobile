@@ -84,7 +84,35 @@ router.post('/bulk-import', auth, async (req, res) => {
 
     try {
       const existing = await db.prepare('SELECT id FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
-      if (existing) { skipped.push({ name, phone, reason: 'Ya existe en Waply' }); continue; }
+      if (existing) {
+        // No se reenvía WhatsApp, pero aprovechamos para reenganchar al CRM por si
+        // este contacto se creó antes de que bulk-import sincronizara con Supabase
+        // (por eso aparecía en Waply pero nunca en el "Whasat" del CRM).
+        try {
+          const conv = await db.prepare('SELECT id, lead_id FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tid, existing.id);
+          if (conv) {
+            const lastMsg = await db.prepare(`
+              SELECT id, wa_message_id, type, body, media_url, created_at, direction
+              FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1
+            `).get(conv.id);
+            if (lastMsg) {
+              pushToCRM({
+                tenantId:    tid,
+                convId:      conv.id,
+                direction:   lastMsg.direction,
+                phone:       waId,
+                contactName: name || waId,
+                leadId:      conv.lead_id || null,
+                message:     lastMsg,
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('bulk-import: fallo backfill CRM para existente', phone, e.message);
+        }
+        skipped.push({ name, phone, reason: 'Ya existe en Waply (resincronizado con CRM)' });
+        continue;
+      }
 
       await db.prepare(`
         INSERT INTO contacts (tenant_id, wa_id, name, phone)
