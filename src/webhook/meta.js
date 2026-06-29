@@ -77,12 +77,27 @@ async function processInboundMessage(msg, value, tenant, io) {
   const waId   = normalizePhone(msg.from);
   const waName = value.contacts?.find(c => c.wa_id === msg.from)?.profile?.name || waId;
 
-  // Upsert contacto
+  // Los anuncios "Click to WhatsApp" de Meta precargan el primer mensaje con las
+  // respuestas del formulario en texto plano (ej. "Full name: Sara Aguilera").
+  // Ese nombre es real; el de profile.name suele ser el usuario de Instagram/
+  // Facebook (ej. "saraaguilera241218") y no sirve para identificar al lead.
+  let extractedName = null;
+  if (msg.type === 'text' && msg.text?.body) {
+    const m = msg.text.body.match(/full name:\s*([^\n]+)/i) || msg.text.body.match(/nombre completo:\s*([^\n]+)/i);
+    if (m) extractedName = m[1].trim();
+  }
+
+  // Upsert contacto — si ya existía con un nombre guardado, no lo pisamos con el
+  // username de WhatsApp en cada mensaje; solo lo mejoramos si el formulario trae
+  // un nombre real que antes no teníamos.
+  const existingContact = await db.prepare('SELECT id, name FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenant.id, waId);
+  const nameToSave = extractedName || existingContact?.name || waName;
+
   await db.prepare(`
     INSERT INTO contacts (tenant_id, wa_id, name, phone)
     VALUES (?, ?, ?, ?)
     ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = excluded.name
-  `).run(tenant.id, waId, waName, waId);
+  `).run(tenant.id, waId, nameToSave, waId);
 
   const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tenant.id, waId);
 
