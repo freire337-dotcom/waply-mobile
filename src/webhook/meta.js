@@ -168,12 +168,12 @@ async function processInboundMessage(msg, value, tenant, io) {
   // los leads nuevos no generaban ninguna notificación.
   if (fullConv.assigned_to) {
     wa.pushToAgent(tenant.id, fullConv.assigned_to,
-      waName, body_text || `[${type}]`,
+      nameToSave, body_text || `[${type}]`,
       { conversation_id: String(conv.id), tenant_slug: tenant.slug }
     ).catch(console.error);
   } else {
     wa.broadcastPush(tenant.id,
-      waName, body_text || `[${type}]`,
+      nameToSave, body_text || `[${type}]`,
       { conversation_id: String(conv.id), tenant_slug: tenant.slug }
     ).catch(console.error);
   }
