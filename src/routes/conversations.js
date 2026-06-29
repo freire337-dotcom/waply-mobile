@@ -2,7 +2,7 @@ const router = require('express').Router();
 const db     = require('../db');
 const auth   = require('../middleware/auth');
 const wa     = require('../services/whatsapp');
-const { pushStatusToCRM } = require('../services/crm-sync');
+const { pushStatusToCRM, pushToCRM } = require('../services/crm-sync');
 const { normalizePhone } = require('../utils/phone');
 
 // Etapas válidas del pipeline de ventas (campo independiente de c.status)
@@ -115,7 +115,7 @@ router.post('/bulk-import', auth, async (req, res) => {
       }
 
       const displayBody = `[Plantilla: ${template}] ${paramName}`;
-      await db.prepare(`
+      const msgIns = await db.prepare(`
         INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status)
         VALUES (?, ?, ?, 'outbound', 'template', ?, 'sent')
         ON CONFLICT(wa_message_id) DO NOTHING
@@ -134,6 +134,25 @@ router.post('/bulk-import', auth, async (req, res) => {
       `).get(convId);
 
       if (io) io.to(`tenant:${tid}`).emit('conversation:updated', fullConv);
+
+      // Sincronizar con CRM — sin esto, los leads importados aquí nunca aparecen
+      // en el chat de WhatsApp del CRM (el resto de flujos sí lo hacen: webhook
+      // inbound, envío manual, motor de automatizaciones).
+      pushToCRM({
+        tenantId:    tid,
+        convId,
+        direction:   'outbound',
+        phone:       waId,
+        contactName: paramName,
+        leadId:      null,
+        message: {
+          id:            msgIns.lastInsertRowid,
+          wa_message_id: waMessageId,
+          type:          'template',
+          body:          displayBody,
+          created_at:    new Date().toISOString(),
+        },
+      });
 
       created.push({ name, phone, conversation_id: convId });
     } catch (err) {
