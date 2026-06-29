@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const db     = require('../db');
 const auth   = require('../middleware/auth');
+const wa     = require('../services/whatsapp');
 const { pushStatusToCRM } = require('../services/crm-sync');
 const { normalizePhone } = require('../utils/phone');
 
@@ -52,6 +53,96 @@ router.post('/', auth, async (req, res) => {
     console.error(err);
     res.status(500).json({ error: 'Error interno' });
   }
+});
+
+// POST /api/conversations/bulk-import — alta masiva de leads que no llegaron solos
+// (p.ej. exportados de Meta Ads Manager: rellenaron el formulario del anuncio pero
+// nunca pulsaron "Enviar" en WhatsApp, así que no hay mensaje ni webhook). Para cada
+// contacto que NO exista ya en Waply: crea contacto+conversación y le envía una
+// plantilla genérica de bienvenida (obligatorio usar plantilla — el lead nunca nos
+// escribió, así que no hay ventana de 24h abierta para mensaje de texto libre).
+// Si el contacto ya existe, se omite (no se le re-envía nada).
+router.post('/bulk-import', auth, async (req, res) => {
+  const { contacts, template = 'bienvenida_gestorfer_v2_', language = 'es' } = req.body;
+  if (!Array.isArray(contacts) || contacts.length === 0) {
+    return res.status(400).json({ error: 'contacts (array) requerido' });
+  }
+
+  const tid = req.agent.tenant_id;
+  const io  = req.app.get('io');
+  const created = [];
+  const skipped = [];
+  const failed  = [];
+
+  for (const raw of contacts) {
+    const name  = (raw?.name || '').trim();
+    const phone = (raw?.phone || '').trim();
+
+    if (!phone) { failed.push({ name, phone, error: 'Sin teléfono' }); continue; }
+    const waId = normalizePhone(phone);
+    if (!waId) { failed.push({ name, phone, error: 'Teléfono no válido' }); continue; }
+
+    try {
+      const existing = await db.prepare('SELECT id FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
+      if (existing) { skipped.push({ name, phone, reason: 'Ya existe en Waply' }); continue; }
+
+      await db.prepare(`
+        INSERT INTO contacts (tenant_id, wa_id, name, phone)
+        VALUES (?, ?, ?, ?)
+      `).run(tid, waId, name || null, phone);
+
+      const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
+
+      const ins = await db.prepare(`
+        INSERT INTO conversations (tenant_id, contact_id, status)
+        VALUES (?, ?, 'open')
+      `).run(tid, contact.id);
+      const convId = ins.lastInsertRowid;
+
+      const paramName = name || 'cliente';
+      const components = [
+        { type: 'body', parameters: [{ type: 'text', text: paramName }] },
+      ];
+
+      let waMessageId;
+      try {
+        waMessageId = await wa.sendTemplate(tid, waId, template, language, components);
+      } catch (sendErr) {
+        // El contacto/conversación ya quedaron creados aunque falle el envío —
+        // se queda "en Waply" pero sin mensaje de bienvenida, visible para el agente.
+        failed.push({ name, phone, error: `Creado pero falló el envío: ${sendErr.message}` });
+        continue;
+      }
+
+      const displayBody = `[Plantilla: ${template}] ${paramName}`;
+      await db.prepare(`
+        INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status)
+        VALUES (?, ?, ?, 'outbound', 'template', ?, 'sent')
+        ON CONFLICT(wa_message_id) DO NOTHING
+      `).run(tid, convId, waMessageId, displayBody);
+
+      await db.prepare(`
+        UPDATE conversations SET last_message = ?, last_msg_at = NOW(), status = 'open' WHERE id = ?
+      `).run(displayBody, convId);
+
+      const fullConv = await db.prepare(`
+        SELECT c.*, ct.name AS contact_name, ct.wa_id, a.name AS agent_name
+        FROM conversations c
+        JOIN contacts ct ON ct.id = c.contact_id
+        LEFT JOIN agents a ON a.id = c.assigned_to
+        WHERE c.id = ?
+      `).get(convId);
+
+      if (io) io.to(`tenant:${tid}`).emit('conversation:updated', fullConv);
+
+      created.push({ name, phone, conversation_id: convId });
+    } catch (err) {
+      console.error('bulk-import error:', err.message);
+      failed.push({ name, phone, error: err.message });
+    }
+  }
+
+  res.json({ created, skipped, failed });
 });
 
 // GET /api/conversations/pipeline — vista Kanban: todas las conversaciones del tenant agrupables por etapa
