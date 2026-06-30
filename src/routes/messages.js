@@ -5,6 +5,7 @@ const auth    = require('../middleware/auth');
 const wa      = require('../services/whatsapp');
 const { pushToCRM } = require('../services/crm-sync');
 const { convertToOggOpus } = require('../services/audio-convert');
+const { compressVideo }   = require('../services/video-compress');
 
 // MIME de audio que la API de WhatsApp acepta tal cual.
 const ALLOWED_AUDIO_MIMES = ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr', 'audio/ogg'];
@@ -82,6 +83,17 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
       buffer = await convertToOggOpus(buffer);
       mimetype = 'audio/ogg';
       originalname = originalname.replace(/\.[^.]+$/, '') + '.ogg';
+    }
+
+    // La API de Meta rechaza videos > 16 MB. La app de WhatsApp comprime
+    // automáticamente antes de enviar; aquí hacemos lo mismo en el backend
+    // para que el usuario no tenga que preocuparse del tamaño.
+    const VIDEO_LIMIT = 16 * 1024 * 1024;
+    if (mimetype.startsWith('video/') && buffer.length > VIDEO_LIMIT) {
+      console.log(`[media] Video de ${(buffer.length/1024/1024).toFixed(1)} MB — comprimiendo antes de subir a Meta...`);
+      buffer = await compressVideo(buffer);
+      mimetype = 'video/mp4';
+      originalname = originalname.replace(/\.[^.]+$/, '') + '.mp4';
     }
 
     const mediaType = getMimeMediaType(mimetype);
