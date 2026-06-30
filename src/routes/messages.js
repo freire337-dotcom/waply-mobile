@@ -84,13 +84,17 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
       originalname = originalname.replace(/\.[^.]+$/, '') + '.ogg';
     }
 
-    // La compresión de video en servidor consume demasiada RAM en Railway y
-    // provoca SIGKILL. El frontend ya bloquea videos > 16 MB con un mensaje claro.
-    if (mimetype.startsWith('video/') && buffer.length > 16 * 1024 * 1024) {
-      return res.status(413).json({ error: 'El video supera el límite de 16 MB de WhatsApp. Comprímelo antes de enviarlo.' });
+    // Si el frontend pide enviar como documento (asDocument=true), forzamos
+    // tipo 'document' — WhatsApp acepta hasta 100 MB para documentos, sin
+    // restricción de codec. Útil para videos > 16 MB que no caben como 'video'.
+    const asDocument = req.body.asDocument === 'true';
+
+    // Videos > 16 MB sin flag asDocument: rechazar con mensaje claro.
+    if (mimetype.startsWith('video/') && buffer.length > 16 * 1024 * 1024 && !asDocument) {
+      return res.status(413).json({ error: 'El video supera 16 MB. Envíalo como documento o comprímelo primero.' });
     }
 
-    const mediaType = getMimeMediaType(mimetype);
+    const mediaType = asDocument ? 'document' : getMimeMediaType(mimetype);
 
     // 1. Subir a Meta y obtener media_id
     const mediaId = await wa.uploadMedia(tid, buffer, mimetype, originalname);
