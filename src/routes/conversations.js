@@ -136,8 +136,14 @@ router.post('/bulk-import', auth, async (req, res) => {
       try {
         waMessageId = await wa.sendTemplate(tid, waId, template, language, components);
       } catch (sendErr) {
-        // El contacto/conversación ya quedaron creados aunque falle el envío —
-        // se queda "en Waply" pero sin mensaje de bienvenida, visible para el agente.
+        // El contacto/conversación ya quedaron creados aunque falle el envío.
+        // Marcamos last_msg_at = NOW() para que aparezcan en la lista del agente
+        // (si queda NULL se ordenan al fondo y no se ven).
+        await db.prepare(`
+          UPDATE conversations
+          SET last_message = '[Lead importado — pendiente de contactar]', last_msg_at = NOW()
+          WHERE id = ?
+        `).run(convId).catch(() => {});
         failed.push({ name, phone, error: `Creado pero falló el envío: ${sendErr.message}` });
         continue;
       }
