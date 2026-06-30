@@ -117,6 +117,17 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
     `).get(insert.lastInsertRowid);
 
     req.app.get('io').to(`conv:${req.params.convId}`).emit('message:new', newMsg);
+
+    pushToCRM({
+      tenantId:    tid,
+      convId:      Number(req.params.convId),
+      direction:   'outbound',
+      phone:       conv.wa_id,
+      contactName: conv.contact_name || conv.wa_id,
+      leadId:      conv.lead_id || null,
+      message:     newMsg,
+    });
+
     res.status(201).json({ message: newMsg });
 
   } catch (err) {
