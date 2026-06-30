@@ -137,9 +137,9 @@ async function checkConversationTasks() {
   }
 }
 
-// ── Job 4: Sin respuesta en 24h ───────────────────────────────────────────────
+// ── Job 4: Sin respuesta en 12h ───────────────────────────────────────────────
 // Busca conversaciones abiertas cuyo último mensaje lo mandamos nosotros (outbound)
-// y lleva 24h+ sin que el contacto responda. Dispara 'conversation.no_response_24h'
+// y lleva 12h+ sin que el contacto responda. Dispara 'conversation.no_response_24h'
 // una sola vez por ciclo — followup_24h_sent se resetea a false en cuanto entra
 // o sale un mensaje nuevo (ver routes/messages.js, webhook/meta.js, action-handlers.js),
 // así que si el contacto responde o le volvemos a escribir, el ciclo se reinicia.
@@ -154,7 +154,7 @@ async function checkNoResponse24h() {
     ) lm ON true
     WHERE c.status = 'open'
       AND c.followup_24h_sent = false
-      AND c.last_msg_at <= NOW() - INTERVAL '24 hours'
+      AND c.last_msg_at <= NOW() - INTERVAL '12 hours'
       AND lm.direction = 'outbound'
   `).all();
 
