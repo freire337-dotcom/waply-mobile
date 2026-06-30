@@ -1,10 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, FlatList, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, RefreshControl, StatusBar,
+  ActivityIndicator, RefreshControl, StatusBar, Modal, TextInput, Alert,
 } from 'react-native';
 import { router } from 'expo-router';
-import { getConversations, ConvStatus } from '../../../services/api';
+import { Ionicons } from '@expo/vector-icons';
+import { getConversations, createConversation, ConvStatus } from '../../../services/api';
 import { useSocket } from '../../../hooks/useSocket';
 import { useUnreadStore } from '../../../store/unread';
 import ConversationItem from '../../../components/ConversationItem';
@@ -22,6 +23,32 @@ export default function ConversationsScreen() {
   const [loading, setLoading]             = useState(true);
   const [refreshing, setRefreshing]       = useState(false);
   const setUnreadTotal                    = useUnreadStore(s => s.setTotal);
+
+  // Alta manual de contacto — para leads que nunca escribieron solos por
+  // WhatsApp (ej. rellenaron el formulario del anuncio pero no llegaron a
+  // enviar el mensaje) y el agente quiere darlos de alta con el teléfono que
+  // sí tiene. No envía ningún mensaje, solo crea el contacto/conversación.
+  const [showNewContact, setShowNewContact] = useState(false);
+  const [newName, setNewName]             = useState('');
+  const [newPhone, setNewPhone]           = useState('');
+  const [creatingContact, setCreatingContact] = useState(false);
+
+  const handleCreateContact = async () => {
+    const phone = newPhone.trim();
+    if (!phone || creatingContact) return;
+    setCreatingContact(true);
+    try {
+      const conv = await createConversation({ name: newName.trim() || undefined, phone });
+      setShowNewContact(false);
+      setNewName('');
+      setNewPhone('');
+      router.push(`/(app)/conversation/${conv.id}`);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error || 'No se pudo crear el contacto');
+    } finally {
+      setCreatingContact(false);
+    }
+  };
 
   const fetchConversations = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
@@ -125,6 +152,51 @@ export default function ConversationsScreen() {
           }
         />
       )}
+
+      {/* Alta manual de contacto */}
+      <TouchableOpacity style={styles.fab} onPress={() => setShowNewContact(true)}>
+        <Ionicons name="person-add" size={22} color="#fff" />
+      </TouchableOpacity>
+
+      <Modal visible={showNewContact} transparent animationType="slide" onRequestClose={() => setShowNewContact(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Nuevo contacto</Text>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 14, gap: 10 }}>
+              <Text style={styles.inputLabel}>Nombre (opcional)</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newName}
+                onChangeText={setNewName}
+                placeholder="Ej: Sara Aguilera"
+                placeholderTextColor="#aaa"
+              />
+              <Text style={styles.inputLabel}>Teléfono</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={newPhone}
+                onChangeText={setNewPhone}
+                placeholder="Ej: +34 640 330 820"
+                placeholderTextColor="#aaa"
+                keyboardType="phone-pad"
+              />
+              <TouchableOpacity
+                style={[styles.createBtn, (!newPhone.trim() || creatingContact) && { opacity: 0.5 }]}
+                onPress={handleCreateContact}
+                disabled={!newPhone.trim() || creatingContact}
+              >
+                {creatingContact
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={styles.createBtnText}>Crear contacto</Text>
+                }
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowNewContact(false)}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -177,4 +249,71 @@ const styles = StyleSheet.create({
   emptyIcon:    { fontSize: 48, marginBottom: 12 },
   emptyText:    { fontSize: 18, fontWeight: '600', color: '#333' },
   emptySubtext: { fontSize: 14, color: '#888', marginTop: 4 },
+
+  fab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#25D366',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalBox: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    paddingTop: 16,
+  },
+  modalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    textAlign: 'center',
+    paddingBottom: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e0e0e0',
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#888',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  modalInput: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#111',
+  },
+  createBtn: {
+    backgroundColor: '#128C7E',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 6,
+  },
+  createBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  modalClose: {
+    padding: 16,
+    alignItems: 'center',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e0e0e0',
+  },
+  modalCloseText: { color: '#e53e3e', fontSize: 15, fontWeight: '600' },
 });

@@ -87,6 +87,18 @@ export const getMediaUrl = async (mediaId: string) => {
   return `${API_BASE}/api/media/${mediaId}?token=${token}`;
 };
 
+// Editar/eliminar mensaje (solo admin — el backend devuelve 403 si no lo es).
+export const editMessage = (id: number, body: string) =>
+  api.patch(`/messages/${id}`, { body }).then(r => r.data.message);
+
+export const deleteMessage = (id: number) =>
+  api.delete(`/messages/${id}`).then(r => r.data);
+
+// Alta manual de contacto/conversación (lead que nunca escribió solo por WhatsApp).
+// No envía ningún mensaje — solo crea el registro para poder escribirle desde aquí.
+export const createConversation = (data: { name?: string; phone: string }) =>
+  api.post('/conversations', data).then(r => r.data.conversation);
+
 // ── Agentes ───────────────────────────────────────────────────────────────────
 export const getAgents = () =>
   api.get('/agents').then(r => r.data.agents);

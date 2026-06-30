@@ -8,7 +8,7 @@ import { getMediaUrl } from '../services/api';
 
 interface Props {
   message: {
-    id: number;
+    id: number | string;
     direction: 'inbound' | 'outbound';
     type: string;
     body: string | null;
@@ -17,7 +17,13 @@ interface Props {
     status: string;
     sender_name?: string;
     created_at: string;
+    edited?: boolean;
+    // Tarjeta de contacto compartida (vCard) — viene ya parseada del backend
+    // cuando type === 'contacts' (ver webhook/meta.js).
+    contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string; wa_id?: string }[] }[] | null;
   };
+  // Editar/eliminar (solo se pasa para administradores — ver pantalla de conversación).
+  onLongPress?: (message: Props['message']) => void;
 }
 
 const ICONS: Record<string, string> = {
@@ -39,7 +45,7 @@ function linkify(text: string): { text: string; isLink: boolean }[] {
     .map(p => ({ text: p, isLink: URL_TEST_RE.test(p) }));
 }
 
-export default function MessageBubble({ message: m }: Props) {
+export default function MessageBubble({ message: m, onLongPress }: Props) {
   const isOut = m.direction === 'outbound';
   const parsedDate = m.created_at ? new Date(m.created_at + 'Z') : null;
   const time  = parsedDate && !isNaN(parsedDate.getTime())
@@ -162,9 +168,18 @@ export default function MessageBubble({ message: m }: Props) {
     ? fmtAudioTime(positionMs)
     : (durationMs ? fmtAudioTime(durationMs) : '0:00');
 
+  // No se puede editar/eliminar un mensaje optimista (todavía no tiene id real
+  // del servidor) — el id temporal empieza por "tmp-".
+  const canLongPress = !!onLongPress && typeof m.id !== 'string';
+
   return (
     <View style={[styles.wrapper, isOut ? styles.wrapperOut : styles.wrapperIn]}>
-      <View style={[
+      <TouchableOpacity
+        activeOpacity={canLongPress ? 0.7 : 1}
+        disabled={!canLongPress}
+        delayLongPress={350}
+        onLongPress={() => onLongPress?.(m)}
+        style={[
         styles.bubble,
         isOut ? styles.bubbleOut : styles.bubbleIn,
         m.status === 'sending' && { opacity: 0.6 },
@@ -261,11 +276,32 @@ export default function MessageBubble({ message: m }: Props) {
           </TouchableOpacity>
         )}
 
+        {m.type === 'contacts' && (
+          <View style={{ gap: 6 }}>
+            {(m.contacts && m.contacts.length ? m.contacts : [null]).map((c, idx) => {
+              const name  = c?.name?.formatted_name || 'Contacto';
+              const phone = c?.phones?.[0]?.phone || c?.phones?.[0]?.wa_id || null;
+              return (
+                <View key={idx} style={styles.contactRow}>
+                  <Text style={styles.contactIcon}>👤</Text>
+                  <View>
+                    <Text style={styles.contactName}>{name}</Text>
+                    {phone && <Text style={styles.contactPhone}>{phone}</Text>}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         {isImage && m.body && (
           <Text selectable style={[styles.body, styles.caption]}>{m.body}</Text>
         )}
 
         <View style={styles.meta}>
+          {m.edited && (
+            <Text style={[styles.time, isOut ? styles.timeOut : styles.timeIn]}>editado · </Text>
+          )}
           <Text style={[styles.time, isOut ? styles.timeOut : styles.timeIn]}>
             {time}
           </Text>
@@ -279,7 +315,7 @@ export default function MessageBubble({ message: m }: Props) {
             </Text>
           )}
         </View>
-      </View>
+      </TouchableOpacity>
 
       {isImage && mediaUri && (
         <Modal visible={previewVisible} transparent animationType="fade" onRequestClose={() => setPreviewVisible(false)}>
@@ -332,6 +368,11 @@ const styles = StyleSheet.create({
   bodyOut: { color: '#111' },
   caption: { color: '#111', marginTop: 4 },
   link: { color: '#1565C0', textDecorationLine: 'underline' },
+
+  contactRow:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  contactIcon:  { fontSize: 20 },
+  contactName:  { fontSize: 14, fontWeight: '600', color: '#111' },
+  contactPhone: { fontSize: 12, color: '#555', marginTop: 1 },
 
   image: {
     width: 220,

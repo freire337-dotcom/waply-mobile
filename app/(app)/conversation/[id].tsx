@@ -14,7 +14,7 @@ import {
   getConversation, getMessages, sendMessage, sendMedia,
   patchConversation, getAgents, PIPELINE_STAGES,
   getConversationTasks, createConversationTask, patchTask, deleteTask,
-  ConversationTask,
+  ConversationTask, editMessage, deleteMessage,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -45,6 +45,14 @@ export default function ConversationScreen() {
   const [showNewTask, setShowNewTask]   = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [savingTask, setSavingTask]     = useState(false);
+
+  // Editar/eliminar mensaje — solo admin (el backend rechaza con 403 si no lo es,
+  // así que ni mostramos la opción a un agente normal).
+  const isAdmin                         = currentAgent?.role === 'admin';
+  const [actionMessage, setActionMessage] = useState<any>(null); // mensaje sobre el que se hizo long-press
+  const [editingMessage, setEditingMessage] = useState<any>(null);
+  const [editText, setEditText]         = useState('');
+  const [savingEdit, setSavingEdit]     = useState(false);
 
   const flatRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -84,7 +92,15 @@ export default function ConversationScreen() {
       return [...withoutTemp, newMsg];
     });
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 100);
-  }, load);
+  }, load,
+  // Edición/borrado puede venir de WaplyAdmin (web) mientras el móvil tiene
+  // la misma conversación abierta — se refleja sin recargar la pantalla.
+  (updatedMsg) => {
+    setMessages(prev => prev.map(m => (m.id === updatedMsg.id ? updatedMsg : m)));
+  },
+  (info) => {
+    setMessages(prev => prev.filter(m => m.id !== info.id));
+  });
 
   // Enviar mensaje
   // Antes se esperaba la respuesta completa del servidor (que a su vez espera
@@ -126,6 +142,61 @@ export default function ConversationScreen() {
     } finally {
       setSending(false);
     }
+  };
+
+  // Long-press sobre un mensaje (solo admin) — abre el menú de acciones
+  const handleLongPressMessage = (msg: any) => {
+    if (!isAdmin) return;
+    setActionMessage(msg);
+  };
+
+  const canEditMessage = (msg: any) =>
+    msg && msg.direction === 'outbound' && (!msg.type || msg.type === 'text');
+
+  const openEditMessage = () => {
+    if (!actionMessage) return;
+    setEditingMessage(actionMessage);
+    setEditText(actionMessage.body || '');
+    setActionMessage(null);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingMessage || !editText.trim() || savingEdit) return;
+    setSavingEdit(true);
+    try {
+      const updated = await editMessage(editingMessage.id, editText.trim());
+      setMessages(prev => prev.map(m => (m.id === updated.id ? updated : m)));
+      setEditingMessage(null);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error || 'No se pudo editar el mensaje');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const handleDeleteMessage = () => {
+    if (!actionMessage) return;
+    const msg = actionMessage;
+    setActionMessage(null);
+    Alert.alert(
+      'Eliminar mensaje',
+      '¿Seguro que quieres eliminar este mensaje del historial? Esto no afecta lo que ya se vio en WhatsApp.',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Eliminar',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteMessage(msg.id);
+              setMessages(prev => prev.filter(m => m.id !== msg.id));
+            } catch (err: any) {
+              Alert.alert('Error', err?.response?.data?.error || 'No se pudo eliminar el mensaje');
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Asignar agente
@@ -371,7 +442,9 @@ export default function ConversationScreen() {
         ref={flatRef}
         data={messages}
         keyExtractor={item => String(item.id)}
-        renderItem={({ item }) => <MessageBubble message={item} />}
+        renderItem={({ item }) => (
+          <MessageBubble message={item} onLongPress={isAdmin ? handleLongPressMessage : undefined} />
+        )}
         contentContainerStyle={styles.messagesList}
         onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
@@ -597,6 +670,60 @@ export default function ConversationScreen() {
               ))}
             </ScrollView>
             <TouchableOpacity style={styles.modalClose} onPress={() => setShowAssign(false)}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Modal acciones de mensaje (editar/eliminar) — solo admin */}
+      <Modal visible={!!actionMessage} transparent animationType="fade" onRequestClose={() => setActionMessage(null)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setActionMessage(null)}>
+          <View style={styles.stageModalBox}>
+            {canEditMessage(actionMessage) && (
+              <TouchableOpacity style={styles.stageOptionRow} onPress={openEditMessage}>
+                <Ionicons name="pencil-outline" size={18} color="#111" />
+                <Text style={styles.stageOptionText}>Editar mensaje</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.stageOptionRow} onPress={handleDeleteMessage}>
+              <Ionicons name="trash-outline" size={18} color="#e53e3e" />
+              <Text style={[styles.stageOptionText, { color: '#e53e3e' }]}>Eliminar mensaje</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.stageOptionRow} onPress={() => setActionMessage(null)}>
+              <Text style={[styles.stageOptionText, { color: '#888' }]}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal editar mensaje */}
+      <Modal visible={!!editingMessage} transparent animationType="slide" onRequestClose={() => setEditingMessage(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Editar mensaje</Text>
+            <View style={{ paddingHorizontal: 20, paddingVertical: 14 }}>
+              <TextInput
+                style={[styles.newTaskInput, { minHeight: 80 }]}
+                value={editText}
+                onChangeText={setEditText}
+                multiline
+                autoFocus
+                placeholder="Texto del mensaje"
+                placeholderTextColor="#aaa"
+              />
+              <TouchableOpacity
+                style={[styles.newTaskBtn, { backgroundColor: '#128C7E', borderRadius: 10, marginTop: 12, borderTopWidth: 0 }, (!editText.trim() || savingEdit) && { opacity: 0.5 }]}
+                onPress={handleSaveEdit}
+                disabled={!editText.trim() || savingEdit}
+              >
+                {savingEdit
+                  ? <ActivityIndicator size="small" color="#fff" />
+                  : <Text style={[styles.newTaskBtnText, { color: '#fff' }]}>Guardar</Text>
+                }
+              </TouchableOpacity>
+            </View>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setEditingMessage(null)}>
               <Text style={styles.modalCloseText}>Cancelar</Text>
             </TouchableOpacity>
           </View>

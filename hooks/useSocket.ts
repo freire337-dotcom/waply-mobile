@@ -74,19 +74,30 @@ export function useSocket(onConversationUpdated?: (conv: any) => void, onReconne
 export function useConversationSocket(
   convId: number,
   onMessage: (msg: any) => void,
-  onReconnect?: () => void
+  onReconnect?: () => void,
+  // Editar/eliminar mensaje puede pasar desde WaplyAdmin web mientras el móvil
+  // tiene la misma conversación abierta — sin esto, el chat se quedaría con la
+  // versión vieja del mensaje hasta salir y volver a entrar a la pantalla.
+  onMessageUpdated?: (msg: any) => void,
+  onMessageDeleted?: (info: { id: number; conversation_id: number }) => void
 ) {
   const callbackRef = useRef(onMessage);
   callbackRef.current = onMessage;
   const reconnectRef = useRef(onReconnect);
   reconnectRef.current = onReconnect;
+  const updatedRef = useRef(onMessageUpdated);
+  updatedRef.current = onMessageUpdated;
+  const deletedRef = useRef(onMessageDeleted);
+  deletedRef.current = onMessageDeleted;
 
   useEffect(() => {
     if (!convId) return;
     let active = true;
     let attachedSocket: Socket | null = null;
     let hasJoinedOnce = false;
-    const handler = (msg: any) => callbackRef.current(msg);
+    const handler        = (msg: any) => callbackRef.current(msg);
+    const updatedHandler  = (msg: any) => updatedRef.current?.(msg);
+    const deletedHandler  = (info: any) => deletedRef.current?.(info);
     const join = () => {
       attachedSocket?.emit('join:conversation', convId);
       // Igual que arriba: los mensajes que llegaron durante el corte no se
@@ -100,6 +111,8 @@ export function useConversationSocket(
       if (!active || attachedSocket) return;
       attachedSocket = s;
       s.on('message:new', handler);
+      s.on('message:updated', updatedHandler);
+      s.on('message:deleted', deletedHandler);
       // El servidor olvida la membresía de la sala "conv:{id}" cada vez que el
       // socket se reconecta (ej. el móvil pierde cobertura un instante o cambia
       // de wifi a datos) — sin re-emitir join:conversation en cada 'connect', la
@@ -121,6 +134,8 @@ export function useConversationSocket(
       if (attachedSocket) {
         attachedSocket.emit('leave:conversation', convId);
         attachedSocket.off('message:new', handler);
+        attachedSocket.off('message:updated', updatedHandler);
+        attachedSocket.off('message:deleted', deletedHandler);
         attachedSocket.off('connect', join);
       }
     };
