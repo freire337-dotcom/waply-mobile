@@ -37,9 +37,18 @@ async function fire(trigger, tenantId, data) {
     WHERE tenant_id = ? AND trigger = ? AND active = 1
   `).all(tenantId, trigger);
 
+  console.log(`[automation] 🔔 trigger="${trigger}" tenant=${tenantId} → ${automations.length} automatización(es) activa(s)`);
+
+  if (automations.length === 0) return;
+
   for (const auto of automations) {
     const conditions = JSON.parse(auto.conditions || '[]');
-    if (!evaluateConditions(conditions, data)) continue;
+    const pass = evaluateConditions(conditions, data);
+    console.log(`[automation] "${auto.name}" (id=${auto.id}) — condiciones: ${pass ? '✅ pasan' : '❌ no pasan'}`);
+    if (!pass) continue;
+
+    const actions = JSON.parse(auto.actions || '[]');
+    console.log(`[automation] Iniciando run para "${auto.name}" con ${actions.length} acción(es): ${actions.map(a => a.type).join(', ')}`);
 
     // Crear run
     const run = await db.prepare(`
@@ -48,9 +57,9 @@ async function fire(trigger, tenantId, data) {
     `).run(tenantId, auto.id, JSON.stringify(data));
 
     // Ejecutar en background (no bloquear el request)
-    executeRun(run.lastInsertRowid, JSON.parse(auto.actions || '[]'), tenantId, data)
+    executeRun(run.lastInsertRowid, actions, tenantId, data)
       .catch(async err => {
-        console.error(`Error en automation_run #${run.lastInsertRowid}:`, err.message);
+        console.error(`[automation] ❌ Error en automation_run #${run.lastInsertRowid}:`, err.message);
         await db.prepare(`UPDATE automation_runs SET status='failed', error=?, completed_at=NOW() WHERE id=?`)
           .run(err.message, run.lastInsertRowid);
       });
@@ -79,6 +88,8 @@ async function executeRun(runId, actions, tenantId, context) {
         actionIndex: i,
       });
 
+      console.log(`[automation] run #${runId} acción[${i}] ${action.type} → ${result.status}${result.note ? ' (' + result.note + ')' : ''}`);
+
       // Mergeamos outputs al contexto para pasos siguientes
       if (result.output) {
         currentContext = { ...currentContext, ...result.output };
@@ -97,7 +108,10 @@ async function executeRun(runId, actions, tenantId, context) {
         return; // pausar ejecución
       }
     } catch (err) {
-      console.error(`Error en acción ${action.type} (run #${runId}):`, err.message);
+      console.error(`[automation] ❌ run #${runId} acción[${i}] ${action.type} falló: ${err.message}`);
+      // Guardar el error en el run para que sea visible en el historial de la UI
+      await db.prepare(`UPDATE automation_runs SET error = COALESCE(error || ' | ', '') || ? WHERE id = ?`)
+        .run(`[${action.type}] ${err.message}`, runId).catch(() => {});
       // Continuar con el siguiente paso aunque uno falle
     }
   }

@@ -74,7 +74,10 @@ async function sendWhatsapp({ tenantId, action, context }) {
   const { type = 'text', template, body_template, body, language = 'es', components = [] } = action.config || {};
 
   const waId = context.contact?.wa_id || context.wa_id;
-  if (!waId) return { status: 'completed', note: 'Sin wa_id, mensaje no enviado' };
+  if (!waId) {
+    console.warn(`[send_whatsapp] Sin wa_id — contexto: contact=${JSON.stringify(context.contact)}, wa_id=${context.wa_id}`);
+    return { status: 'completed', note: 'Sin wa_id, mensaje no enviado' };
+  }
 
   // Resolver variables en el body
   const resolvedBody = (body_template || body || '').replace(
@@ -84,6 +87,16 @@ async function sendWhatsapp({ tenantId, action, context }) {
       return context[obj]?.[key] || '';
     }
   );
+
+  // Validar que haya contenido antes de enviar
+  if (type !== 'template' && !resolvedBody.trim()) {
+    console.warn(`[send_whatsapp] body vacío después de resolver variables — action.config: ${JSON.stringify(action.config)}`);
+    return { status: 'completed', note: 'Body vacío, mensaje no enviado' };
+  }
+  if (type === 'template' && !template) {
+    console.warn(`[send_whatsapp] Tipo template pero sin nombre de plantilla — action.config: ${JSON.stringify(action.config)}`);
+    return { status: 'completed', note: 'Sin nombre de plantilla, mensaje no enviado' };
+  }
 
   // Resolver variables de contexto dentro de los parámetros de components
   const resolveText = (text) => (text || '').replace(
@@ -100,11 +113,24 @@ async function sendWhatsapp({ tenantId, action, context }) {
     ),
   }));
 
+  console.log(`[send_whatsapp] Enviando a ${waId} | type=${type} | body="${resolvedBody}" | template=${template || 'N/A'}`);
+
   let waMessageId;
-  if (type === 'template') {
-    waMessageId = await wa.sendTemplate(tenantId, waId, template, language, resolvedComponents);
-  } else {
-    waMessageId = await wa.sendText(tenantId, waId, resolvedBody);
+  try {
+    if (type === 'template') {
+      waMessageId = await wa.sendTemplate(tenantId, waId, template, language, resolvedComponents);
+    } else {
+      waMessageId = await wa.sendText(tenantId, waId, resolvedBody);
+    }
+    console.log(`[send_whatsapp] ✅ Mensaje enviado — wa_message_id=${waMessageId}`);
+  } catch (err) {
+    // Extraer el mensaje de error de Meta (viene en err.response.data)
+    const metaError = err.response?.data?.error;
+    const metaMsg   = metaError
+      ? `Meta ${metaError.code}: ${metaError.message} (subcode: ${metaError.error_subcode || 'N/A'})`
+      : err.message;
+    console.error(`[send_whatsapp] ❌ Error enviando a ${waId}: ${metaMsg}`);
+    throw new Error(`WhatsApp API error: ${metaMsg}`);
   }
 
   // Las plantillas no tienen "body" de texto libre (van por components) — sin esto
