@@ -211,7 +211,10 @@ async function processInboundMessage(msg, value, tenant, io) {
     convId:      conv.id,
     direction:   'inbound',
     phone:       waId,
-    contactName: waName,
+    // nameToSave es el nombre real del contacto en la BD (puede ser del formulario
+    // del anuncio, del historial, o del perfil de WhatsApp). waName solo es el
+    // nombre de perfil de Meta y cae a número de teléfono si Meta no lo incluye.
+    contactName: nameToSave,
     leadId:      contact.lead_id || null,
     message:     newMsg,
   });
