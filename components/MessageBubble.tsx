@@ -6,6 +6,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { getMediaUrl } from '../services/api';
 
+interface QuotedMessage {
+  body?: string | null;
+  type?: string;
+  direction?: 'inbound' | 'outbound';
+  sender_name?: string | null;
+}
+
 interface Props {
   message: {
     id: number | string;
@@ -21,7 +28,11 @@ interface Props {
     // Tarjeta de contacto compartida (vCard) — viene ya parseada del backend
     // cuando type === 'contacts' (ver webhook/meta.js).
     contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string; wa_id?: string }[] }[] | null;
+    // Mensaje al que se está respondiendo (reply/quote de WhatsApp)
+    quoted_message?: QuotedMessage | null;
+    wa_message_id?: string | null;
   };
+  contactName?: string; // nombre del contacto (para mostrar quién envió en citas inbound)
   // Editar/eliminar (solo se pasa para administradores — ver pantalla de conversación).
   onLongPress?: (message: Props['message']) => void;
 }
@@ -45,7 +56,7 @@ function linkify(text: string): { text: string; isLink: boolean }[] {
     .map(p => ({ text: p, isLink: URL_TEST_RE.test(p) }));
 }
 
-export default function MessageBubble({ message: m, onLongPress }: Props) {
+export default function MessageBubble({ message: m, contactName, onLongPress }: Props) {
   const isOut = m.direction === 'outbound';
   const parsedDate = m.created_at ? new Date(m.created_at + 'Z') : null;
   const time  = parsedDate && !isNaN(parsedDate.getTime())
@@ -186,6 +197,28 @@ export default function MessageBubble({ message: m, onLongPress }: Props) {
       ]}>
         {!isOut && m.sender_name && (
           <Text style={styles.sender}>{m.sender_name}</Text>
+        )}
+
+        {/* Cita del mensaje al que se responde (reply/quote de WhatsApp) */}
+        {m.quoted_message && (
+          <View style={[styles.quotedBox, isOut ? styles.quotedBoxOut : styles.quotedBoxIn]}>
+            <View style={[styles.quotedBar, { backgroundColor: isOut ? '#075e54' : '#128C7E' }]} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.quotedSender, { color: isOut ? '#075e54' : '#128C7E' }]} numberOfLines={1}>
+                {m.quoted_message.direction === 'outbound'
+                  ? (m.quoted_message.sender_name || 'Tú')
+                  : (contactName || 'Cliente')}
+              </Text>
+              <Text style={styles.quotedBody} numberOfLines={2}>
+                {m.quoted_message.type && m.quoted_message.type !== 'text'
+                  ? (m.quoted_message.type === 'image' ? '📷 Imagen'
+                    : m.quoted_message.type === 'video' ? '🎥 Video'
+                    : m.quoted_message.type === 'audio' ? '🎤 Audio'
+                    : '📎 Archivo')
+                  : (m.quoted_message.body || '')}
+              </Text>
+            </View>
+          </View>
         )}
 
         {/* Mensajes de plantilla ('template') no tenían rama de render — quedaban
@@ -361,6 +394,32 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#128C7E',
     marginBottom: 2,
+  },
+
+  quotedBox: {
+    flexDirection: 'row',
+    borderRadius: 6,
+    marginBottom: 6,
+    overflow: 'hidden',
+    paddingVertical: 4,
+    paddingRight: 8,
+  },
+  quotedBoxIn:  { backgroundColor: 'rgba(0,0,0,0.05)' },
+  quotedBoxOut: { backgroundColor: 'rgba(0,0,0,0.08)' },
+  quotedBar: {
+    width: 3,
+    borderRadius: 2,
+    marginRight: 7,
+  },
+  quotedSender: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  quotedBody: {
+    fontSize: 12,
+    color: '#555',
+    lineHeight: 16,
   },
 
   body: { fontSize: 15, lineHeight: 20 },

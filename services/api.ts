@@ -59,6 +59,7 @@ export const getMessages = (convId: number, page = 1) =>
 export const sendMessage = (convId: number, payload: {
   type?: 'text' | 'template';
   body?: string;
+  context_id?: string | null; // wa_message_id del mensaje al que se responde (reply/quote)
   template_name?: string;
   template_language?: string;
   template_components?: unknown[];

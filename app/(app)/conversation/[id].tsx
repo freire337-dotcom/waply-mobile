@@ -54,6 +54,12 @@ export default function ConversationScreen() {
   const [editText, setEditText]         = useState('');
   const [savingEdit, setSavingEdit]     = useState(false);
 
+  // Responder a un mensaje (quote/reply de WhatsApp)
+  const [replyingTo, setReplyingTo] = useState<{
+    wa_message_id: string; body: string | null; type: string;
+    direction: 'inbound' | 'outbound'; sender_name?: string | null;
+  } | null>(null);
+
   const flatRef = useRef<FlatList>(null);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -113,6 +119,12 @@ export default function ConversationScreen() {
     if (!trimmed || sending) return;
 
     const tempId = `tmp-${Date.now()}`;
+    const contextId = replyingTo?.wa_message_id || null;
+    const quotedSnap = replyingTo ? {
+      body: replyingTo.body, type: replyingTo.type,
+      direction: replyingTo.direction, sender_name: replyingTo.sender_name,
+    } : null;
+
     const optimisticMsg = {
       id: tempId,
       direction: 'outbound',
@@ -121,15 +133,17 @@ export default function ConversationScreen() {
       status: 'sending',
       sender_name: currentAgent?.name,
       created_at: new Date().toISOString(),
+      quoted_message: quotedSnap,
     };
 
     setText('');
+    setReplyingTo(null);
     setSending(true);
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 50);
 
     try {
-      const msg = await sendMessage(convId, { type: 'text', body: trimmed });
+      const msg = await sendMessage(convId, { type: 'text', body: trimmed, context_id: contextId });
       setMessages(prev => {
         const withoutTemp = prev.filter(m => m.id !== tempId);
         return withoutTemp.find(m => m.id === msg.id) ? withoutTemp : [...withoutTemp, msg];
@@ -139,14 +153,17 @@ export default function ConversationScreen() {
       Alert.alert('Error', detail);
       setMessages(prev => prev.filter(m => m.id !== tempId));
       setText(trimmed); // restaurar texto
+      if (contextId) setReplyingTo(replyingTo); // restaurar la cita si falló
     } finally {
       setSending(false);
     }
   };
 
-  // Long-press sobre un mensaje (solo admin) — abre el menú de acciones
+  // Long-press sobre un mensaje — abre el menú de acciones.
+  // Responder está disponible para todos; editar/eliminar solo para admin.
   const handleLongPressMessage = (msg: any) => {
-    if (!isAdmin) return;
+    // Solo mostrar el modal si hay algo que hacer (responder, o admin puede editar/borrar)
+    if (!msg.wa_message_id && !isAdmin) return;
     setActionMessage(msg);
   };
 
@@ -443,7 +460,11 @@ export default function ConversationScreen() {
         data={messages}
         keyExtractor={item => String(item.id)}
         renderItem={({ item }) => (
-          <MessageBubble message={item} onLongPress={isAdmin ? handleLongPressMessage : undefined} />
+          <MessageBubble
+            message={item}
+            contactName={conversation?.contact_name}
+            onLongPress={handleLongPressMessage}
+          />
         )}
         contentContainerStyle={styles.messagesList}
         onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
@@ -454,6 +475,26 @@ export default function ConversationScreen() {
         }
         style={styles.messagesContainer}
       />
+
+      {/* Barra de preview de respuesta */}
+      {replyingTo && (
+        <View style={styles.replyBar}>
+          <View style={styles.replyBarLine} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.replyBarSender} numberOfLines={1}>
+              Respondiendo a {replyingTo.direction === 'inbound' ? (conversation?.contact_name || 'Cliente') : 'ti mismo'}
+            </Text>
+            <Text style={styles.replyBarBody} numberOfLines={1}>
+              {replyingTo.type !== 'text'
+                ? (replyingTo.type === 'image' ? '📷 Imagen' : replyingTo.type === 'video' ? '🎥 Video' : replyingTo.type === 'audio' ? '🎤 Audio' : '📎 Archivo')
+                : (replyingTo.body || '')}
+            </Text>
+          </View>
+          <TouchableOpacity onPress={() => setReplyingTo(null)} style={{ padding: 8 }}>
+            <Ionicons name="close" size={18} color="#888" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Input */}
       {isRecording ? (
@@ -676,20 +717,38 @@ export default function ConversationScreen() {
         </View>
       </Modal>
 
-      {/* Modal acciones de mensaje (editar/eliminar) — solo admin */}
+      {/* Modal acciones de mensaje (responder/editar/eliminar) */}
       <Modal visible={!!actionMessage} transparent animationType="fade" onRequestClose={() => setActionMessage(null)}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setActionMessage(null)}>
           <View style={styles.stageModalBox}>
-            {canEditMessage(actionMessage) && (
+            {/* Responder siempre disponible si el mensaje tiene wa_message_id */}
+            {actionMessage?.wa_message_id && (
+              <TouchableOpacity style={styles.stageOptionRow} onPress={() => {
+                setReplyingTo({
+                  wa_message_id: actionMessage.wa_message_id,
+                  body: actionMessage.body,
+                  type: actionMessage.type,
+                  direction: actionMessage.direction,
+                  sender_name: actionMessage.sender_name,
+                });
+                setActionMessage(null);
+              }}>
+                <Ionicons name="return-down-back-outline" size={18} color="#128C7E" />
+                <Text style={[styles.stageOptionText, { color: '#128C7E' }]}>Responder</Text>
+              </TouchableOpacity>
+            )}
+            {isAdmin && canEditMessage(actionMessage) && (
               <TouchableOpacity style={styles.stageOptionRow} onPress={openEditMessage}>
                 <Ionicons name="pencil-outline" size={18} color="#111" />
                 <Text style={styles.stageOptionText}>Editar mensaje</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.stageOptionRow} onPress={handleDeleteMessage}>
-              <Ionicons name="trash-outline" size={18} color="#e53e3e" />
-              <Text style={[styles.stageOptionText, { color: '#e53e3e' }]}>Eliminar mensaje</Text>
-            </TouchableOpacity>
+            {isAdmin && (
+              <TouchableOpacity style={styles.stageOptionRow} onPress={handleDeleteMessage}>
+                <Ionicons name="trash-outline" size={18} color="#e53e3e" />
+                <Text style={[styles.stageOptionText, { color: '#e53e3e' }]}>Eliminar mensaje</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={styles.stageOptionRow} onPress={() => setActionMessage(null)}>
               <Text style={[styles.stageOptionText, { color: '#888' }]}>Cancelar</Text>
             </TouchableOpacity>
@@ -846,6 +905,33 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: '#aaa' },
   sendIcon: { color: '#fff', fontSize: 18, marginLeft: 2 },
+
+  replyBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f7f7f7',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ddd',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 8,
+  },
+  replyBarLine: {
+    width: 3,
+    alignSelf: 'stretch',
+    backgroundColor: '#128C7E',
+    borderRadius: 2,
+  },
+  replyBarSender: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#128C7E',
+  },
+  replyBarBody: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 1,
+  },
 
   recordingBar: {
     flex: 1,
