@@ -201,11 +201,32 @@ router.post('/:convId/messages', auth, async (req, res) => {
       WHERE id = ?
     `).run(body || `[${type}]`, req.params.convId);
 
-    const newMsg = await db.prepare(`
-      SELECT m.*, a.name AS sender_name FROM messages m
-      LEFT JOIN agents a ON a.id = m.sender_id
+    // Incluir el mensaje citado en la respuesta para que WaplyAdmin/móvil
+    // rendericen la cita sin necesidad de recargar mensajes.
+    const newMsgRow = await db.prepare(`
+      SELECT m.*, a.name AS sender_name,
+             qm.body      AS quoted_body,
+             qm.type      AS quoted_type,
+             qm.direction AS quoted_direction,
+             qm.media_url AS quoted_media_url,
+             qa.name      AS quoted_sender_name
+      FROM messages m
+      LEFT JOIN agents a  ON a.id  = m.sender_id
+      LEFT JOIN messages qm ON qm.wa_message_id = m.context_wa_message_id
+      LEFT JOIN agents qa ON qa.id = qm.sender_id
       WHERE m.id = ?
     `).get(insert.lastInsertRowid);
+
+    const newMsg = {
+      ...newMsgRow,
+      quoted_message: newMsgRow.context_wa_message_id ? {
+        body:        newMsgRow.quoted_body,
+        type:        newMsgRow.quoted_type,
+        direction:   newMsgRow.quoted_direction,
+        media_url:   newMsgRow.quoted_media_url,
+        sender_name: newMsgRow.quoted_sender_name,
+      } : null,
+    };
 
     req.app.get('io').to(`conv:${req.params.convId}`).emit('message:new', newMsg);
 
