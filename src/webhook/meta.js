@@ -173,10 +173,13 @@ async function processInboundMessage(msg, value, tenant, io) {
   if (existing) return;
 
   // Insertar mensaje
+  // msg.context?.id es el wa_message_id del mensaje al que el cliente responde
+  const contextWaMessageId = msg.context?.id || null;
+
   await db.prepare(`
-    INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, contacts_payload, status)
-    VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, ?, 'received')
-  `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime, contacts_payload);
+    INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, contacts_payload, context_wa_message_id, status)
+    VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, ?, ?, 'received')
+  `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime, contacts_payload, contextWaMessageId);
 
   // Actualizar conversación. followup_24h_sent = false: el contacto acaba de
   // responder, así que el ciclo de "sin respuesta 24h" se reinicia.

@@ -20,17 +20,20 @@ async function getTenantCreds(tenantId) {
 }
 
 // ── Enviar mensaje de texto ───────────────────────────────────────────────────
-async function sendText(tenantId, toWaId, body) {
+async function sendText(tenantId, toWaId, body, contextMessageId = null) {
   const { wa_phone_id, wa_token } = await getTenantCreds(tenantId);
+  const payload = {
+    messaging_product: 'whatsapp',
+    to: toWaId,
+    recipient_type: 'individual',
+    type: 'text',
+    text: { body, preview_url: false },
+  };
+  // Si es una respuesta a un mensaje concreto, WhatsApp muestra la cita encima.
+  if (contextMessageId) payload.context = { message_id: contextMessageId };
   const res = await axios.post(
     `${GRAPH_URL}/${wa_phone_id}/messages`,
-    {
-      messaging_product: 'whatsapp',
-      to: toWaId,
-      recipient_type: 'individual',
-      type: 'text',
-      text: { body, preview_url: false },
-    },
+    payload,
     { headers: { Authorization: `Bearer ${wa_token}` } }
   );
   return res.data?.messages?.[0]?.id;

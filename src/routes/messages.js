@@ -36,9 +36,16 @@ router.get('/:convId/messages', auth, async (req, res) => {
     if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
 
     const rows = await db.prepare(`
-      SELECT m.*, a.name AS sender_name
+      SELECT m.*, a.name AS sender_name,
+             qm.body      AS quoted_body,
+             qm.type      AS quoted_type,
+             qm.direction AS quoted_direction,
+             qm.media_url AS quoted_media_url,
+             qa.name      AS quoted_sender_name
       FROM messages m
-      LEFT JOIN agents a ON a.id = m.sender_id
+      LEFT JOIN agents a  ON a.id  = m.sender_id
+      LEFT JOIN messages qm ON qm.wa_message_id = m.context_wa_message_id
+      LEFT JOIN agents qa ON qa.id = qm.sender_id
       WHERE m.conversation_id = ? AND m.tenant_id = ?
       ORDER BY m.created_at ASC
       LIMIT ? OFFSET ?
@@ -49,6 +56,13 @@ router.get('/:convId/messages', auth, async (req, res) => {
     const messages = rows.map(m => ({
       ...m,
       contacts: m.contacts_payload ? JSON.parse(m.contacts_payload) : null,
+      quoted_message: m.context_wa_message_id ? {
+        body:        m.quoted_body,
+        type:        m.quoted_type,
+        direction:   m.quoted_direction,
+        media_url:   m.quoted_media_url,
+        sender_name: m.quoted_sender_name,
+      } : null,
     }));
 
     res.json({ messages, page: Number(page) });
@@ -149,7 +163,7 @@ router.post('/:convId/messages/media', auth, upload.single('file'), async (req, 
 
 // POST /api/conversations/:convId/messages  — texto y plantillas
 router.post('/:convId/messages', auth, async (req, res) => {
-  const { type = 'text', body, template_name, template_language, template_components } = req.body;
+  const { type = 'text', body, context_id, template_name, template_language, template_components } = req.body;
   const tid = req.agent.tenant_id;
 
   const conv = await db.prepare(`
@@ -164,7 +178,7 @@ router.post('/:convId/messages', auth, async (req, res) => {
 
     if (type === 'text') {
       if (!body) return res.status(400).json({ error: 'body requerido' });
-      waMessageId = await wa.sendText(tid, conv.wa_id, body);
+      waMessageId = await wa.sendText(tid, conv.wa_id, body, context_id || null);
     } else if (type === 'template') {
       waMessageId = await wa.sendTemplate(tid, conv.wa_id, template_name, template_language, template_components);
     } else {
@@ -172,9 +186,9 @@ router.post('/:convId/messages', auth, async (req, res) => {
     }
 
     const insert = await db.prepare(`
-      INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, status, sender_id)
-      VALUES (?, ?, ?, 'outbound', ?, ?, 'sent', ?)
-    `).run(tid, req.params.convId, waMessageId || null, type, body || null, req.agent.id);
+      INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, context_wa_message_id, status, sender_id)
+      VALUES (?, ?, ?, 'outbound', ?, ?, ?, 'sent', ?)
+    `).run(tid, req.params.convId, waMessageId || null, type, body || null, context_id || null, req.agent.id);
 
     // Si el lead seguía "abierto" (sin contactar) en el Pipeline y ahora le respondimos,
     // pasa automáticamente a "contactado" — ya hubo respuesta de nuestro lado.

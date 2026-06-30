@@ -194,6 +194,9 @@ async function initSchema() {
     -- Evita re-disparar el trigger "sin respuesta 24h" en cada pasada del cron;
     -- se resetea a false en cuanto entra o sale un mensaje nuevo en la conversación.
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS followup_24h_sent BOOLEAN NOT NULL DEFAULT false;
+    -- Referencia al wa_message_id del mensaje al que se responde (reply/quote de WhatsApp).
+    -- Null si el mensaje no es una respuesta. Ver whatsapp.js sendText y webhook/meta.js.
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS context_wa_message_id TEXT;
 
     -- Cola de webhooks: cada evento de Meta se guarda aquí ANTES de procesarlo.
     -- Si el servidor muere a mitad del procesamiento, al reiniciar se reprocesarán
