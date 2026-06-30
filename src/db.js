@@ -187,6 +187,10 @@ async function initSchema() {
     ALTER TABLE tenants ADD COLUMN IF NOT EXISTS agent_limit INTEGER;
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pipeline_stage TEXT NOT NULL DEFAULT 'abierto';
     ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited BOOLEAN NOT NULL DEFAULT false;
+    -- Meta envía las tarjetas de contacto compartidas (vCard) en msg.contacts, no en
+    -- msg.text/msg.<media> — sin esta columna ese payload se perdía y el mensaje
+    -- quedaba guardado con body=null (ver webhook/meta.js).
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS contacts_payload TEXT;
     -- Evita re-disparar el trigger "sin respuesta 24h" en cada pasada del cron;
     -- se resetea a false en cuanto entra o sale un mensaje nuevo en la conversación.
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS followup_24h_sent BOOLEAN NOT NULL DEFAULT false;

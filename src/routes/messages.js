@@ -35,7 +35,7 @@ router.get('/:convId/messages', auth, async (req, res) => {
     const conv = await db.prepare('SELECT id FROM conversations WHERE id = ? AND tenant_id = ?').get(req.params.convId, tid);
     if (!conv) return res.status(404).json({ error: 'Conversación no encontrada' });
 
-    const messages = await db.prepare(`
+    const rows = await db.prepare(`
       SELECT m.*, a.name AS sender_name
       FROM messages m
       LEFT JOIN agents a ON a.id = m.sender_id
@@ -43,6 +43,13 @@ router.get('/:convId/messages', auth, async (req, res) => {
       ORDER BY m.created_at ASC
       LIMIT ? OFFSET ?
     `).all(req.params.convId, tid, limit, offset);
+
+    // contacts_payload va como TEXT (JSON serializado) en la BD — el front
+    // espera el array ya parseado en `contacts` (ver tarjetas de contacto/vCard).
+    const messages = rows.map(m => ({
+      ...m,
+      contacts: m.contacts_payload ? JSON.parse(m.contacts_payload) : null,
+    }));
 
     res.json({ messages, page: Number(page) });
   } catch (err) {

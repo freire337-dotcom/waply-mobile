@@ -112,7 +112,7 @@ async function processInboundMessage(msg, value, tenant, io) {
   }
 
   // Extraer contenido del mensaje
-  let type = msg.type, body_text = null, media_url = null, media_mime = null;
+  let type = msg.type, body_text = null, media_url = null, media_mime = null, contacts_payload = null;
 
   if (type === 'text') {
     body_text = msg.text?.body;
@@ -129,6 +129,13 @@ async function processInboundMessage(msg, value, tenant, io) {
   } else if (type === 'button') {
     body_text = msg.button?.text;
     type      = 'text';
+  } else if (type === 'contacts') {
+    // Tarjeta de contacto compartida (vCard) — Meta la manda en msg.contacts,
+    // no en msg.text ni msg.<media>. Antes esto se perdía: body quedaba null
+    // y no había nada que reenviar al front (ver bug reportado en conv. Isaura).
+    const names = (msg.contacts || []).map(c => c.name?.formatted_name).filter(Boolean);
+    body_text = names.length ? `📇 Contacto compartido: ${names.join(', ')}` : '📇 Contacto compartido';
+    contacts_payload = JSON.stringify(msg.contacts || []);
   }
 
   // Deduplicación
@@ -137,9 +144,9 @@ async function processInboundMessage(msg, value, tenant, io) {
 
   // Insertar mensaje
   await db.prepare(`
-    INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, status)
-    VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, 'received')
-  `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime);
+    INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, contacts_payload, status)
+    VALUES (?, ?, ?, 'inbound', ?, ?, ?, ?, ?, 'received')
+  `).run(tenant.id, conv.id, msg.id, type, body_text, media_url, media_mime, contacts_payload);
 
   // Actualizar conversación. followup_24h_sent = false: el contacto acaba de
   // responder, así que el ciclo de "sin respuesta 24h" se reinicia.
@@ -157,7 +164,13 @@ async function processInboundMessage(msg, value, tenant, io) {
     WHERE c.id = ?
   `).get(conv.id);
 
-  const newMsg = await db.prepare('SELECT * FROM messages WHERE wa_message_id = ?').get(msg.id);
+  const newMsgRow = await db.prepare('SELECT * FROM messages WHERE wa_message_id = ?').get(msg.id);
+  // contacts_payload va como TEXT (JSON serializado) en la BD — el front
+  // (WaplyAdmin/móvil) espera el array ya parseado en `contacts`.
+  const newMsg = {
+    ...newMsgRow,
+    contacts: newMsgRow.contacts_payload ? JSON.parse(newMsgRow.contacts_payload) : null,
+  };
 
   // Emitir tiempo real (sala del tenant + sala de conversación)
   io.to(`tenant:${tenant.id}`).emit('conversation:updated', fullConv);
