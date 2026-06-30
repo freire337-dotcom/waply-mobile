@@ -6,7 +6,7 @@ const auth   = require('../middleware/auth');
 // GET /api/agents  — listar agentes (para asignación)
 router.get('/', auth, async (req, res) => {
   try {
-    const agents = await db.prepare('SELECT id, name, email, role FROM agents WHERE tenant_id = ? ORDER BY name').all(req.agent.tenant_id);
+    const agents = await db.prepare('SELECT id, name, email, role, active, is_ai_agent FROM agents WHERE tenant_id = ? ORDER BY name').all(req.agent.tenant_id);
     res.json({ agents });
   } catch (err) {
     console.error(err);

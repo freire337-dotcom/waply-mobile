@@ -10,6 +10,7 @@ const db      = require('../db');
 const engine  = require('../engine/automation-engine');
 const wa      = require('../services/whatsapp');
 const { pushToCRM } = require('../services/crm-sync');
+const { respondIfAIAgent } = require('../services/ai-agent');
 const { normalizePhone } = require('../utils/phone');
 
 // GET /webhook/meta — verificación (Meta usa un solo verify token global)
@@ -260,6 +261,11 @@ async function processInboundMessage(msg, value, tenant, io) {
     conversation_id: conv.id,
     lead_id:         contact.lead_id,
   }).catch(console.error);
+
+  // ── Agente IA: responder automáticamente si la conv está asignada a la IA ──
+  // Se dispara sin await para no bloquear el procesamiento del webhook.
+  // El servicio maneja sus propios errores internamente.
+  respondIfAIAgent(tenant.id, conv.id, nameToSave).catch(console.error);
 }
 
 // Reprocesa entradas que quedaron en status='pending' (servidor caído a mitad)

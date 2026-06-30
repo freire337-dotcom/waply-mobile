@@ -212,6 +212,21 @@ async function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_webhook_queue_status ON webhook_queue(status, created_at);
 
+    -- Agente IA: columnas en agents para marcar si es un bot y su configuración
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS is_ai_agent BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS ai_system_prompt TEXT;
+    ALTER TABLE agents ADD COLUMN IF NOT EXISTS ai_model TEXT DEFAULT 'claude-3-5-haiku-20241022';
+
+    -- Configuración de API key del agente IA (una por tenant)
+    CREATE TABLE IF NOT EXISTS ai_agent_config (
+      id          SERIAL PRIMARY KEY,
+      tenant_id   INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      provider    TEXT NOT NULL DEFAULT 'anthropic',  -- anthropic | openai
+      api_key     TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(tenant_id)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);
