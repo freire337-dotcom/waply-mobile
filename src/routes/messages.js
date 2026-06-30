@@ -13,7 +13,7 @@ const ALLOWED_AUDIO_MIMES = ['audio/aac', 'audio/mp4', 'audio/mpeg', 'audio/amr'
 // Multer en memoria (no guarda en disco, sube directo a Meta)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 }, // 25 MB máx
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200 MB — el backend comprime video/audio antes de subir a Meta
 });
 
 // MIME → tipo WhatsApp
