@@ -20,7 +20,8 @@ const mediaRoutes         = require('./routes/media');
 const triggersRoutes      = require('./triggers/index');
 const releasesRoutes      = require('./routes/releases');
 const tasksRoutes         = require('./routes/tasks');
-const metaWebhook         = require('./webhook/meta');
+const metaWebhook                    = require('./webhook/meta');
+const { replayPendingWebhooks }      = require('./webhook/meta');
 const { startCronJobs }   = require('./engine/cron');
 const { setIO }           = require('./io');
 
@@ -91,6 +92,11 @@ const PORT = process.env.PORT || 3001;
 async function start() {
   try {
     await initSchema();
+
+    // Reprocesar webhooks que quedaron en status='pending' antes del último reinicio
+    // (Railway mata el proceso con SIGKILL durante OOM/deploy, esto evita perder leads)
+    await replayPendingWebhooks(io);
+
     startCronJobs();
     server.listen(PORT, () => {
       console.log(`\n🚀 Whasat Backend corriendo en http://localhost:${PORT}`);

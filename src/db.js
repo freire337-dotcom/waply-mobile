@@ -195,6 +195,20 @@ async function initSchema() {
     -- se resetea a false en cuanto entra o sale un mensaje nuevo en la conversación.
     ALTER TABLE conversations ADD COLUMN IF NOT EXISTS followup_24h_sent BOOLEAN NOT NULL DEFAULT false;
 
+    -- Cola de webhooks: cada evento de Meta se guarda aquí ANTES de procesarlo.
+    -- Si el servidor muere a mitad del procesamiento, al reiniciar se reprocesarán
+    -- los que quedaron en status='pending' — así no se pierden leads aunque el
+    -- servidor caiga por OOM u otro motivo (ver webhook/meta.js).
+    CREATE TABLE IF NOT EXISTS webhook_queue (
+      id          SERIAL PRIMARY KEY,
+      payload     TEXT    NOT NULL,
+      status      TEXT    NOT NULL DEFAULT 'pending',  -- pending | done | error
+      error       TEXT,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS idx_webhook_queue_status ON webhook_queue(status, created_at);
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);

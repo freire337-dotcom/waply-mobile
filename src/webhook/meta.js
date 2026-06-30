@@ -30,48 +30,78 @@ router.get('/', async (req, res) => {
 });
 
 // POST /webhook/meta — mensajes entrantes
-router.post('/', (req, res) => {
-  res.sendStatus(200); // responder rápido a Meta
+//
+// PATRÓN WEBHOOK QUEUE: antes de procesar nada guardamos el payload en
+// webhook_queue (status='pending'). Si Railway mata el proceso a mitad
+// del procesamiento (OOM/SIGKILL), el registro queda en pending y al
+// reiniciar `index.js` llama a `replayPendingWebhooks()` para reprocesarlo.
+// Así no se pierden leads aunque el servidor se caiga durante la ejecución.
+router.post('/', async (req, res) => {
+  res.sendStatus(200); // responder rápido a Meta (≤ 500ms o Meta reintenta)
   console.log('📨 Webhook Meta recibido:', JSON.stringify(req.body).slice(0, 200));
 
+  const body = req.body;
+  if (body.object !== 'whatsapp_business_account') return;
+
+  // 1. Persistir en cola ANTES de procesar
+  let queueId = null;
   try {
-    const body = req.body;
-    if (body.object !== 'whatsapp_business_account') return;
+    const ins = await db.prepare(
+      `INSERT INTO webhook_queue (payload, status) VALUES (?, 'pending')`
+    ).run(JSON.stringify(body));
+    queueId = ins.lastInsertRowid;
+  } catch (err) {
+    console.error('⚠️  No se pudo guardar en webhook_queue:', err);
+    // Continuamos igual — preferimos procesar aunque no podamos garantizar
+    // la recuperación en este caso puntual.
+  }
 
-    for (const entry of body.entry || []) {
-      for (const change of entry.changes || []) {
-        if (change.field !== 'messages') continue;
-        const value = change.value;
-
-        // Identificar tenant por phone_number_id
-        const phoneNumberId = value.metadata?.phone_number_id;
-
-        db.prepare('SELECT * FROM tenants WHERE wa_phone_id = ? AND active = 1').get(phoneNumberId)
-          .then(tenant => {
-            if (!tenant) {
-              console.warn('Webhook recibido para phone_id desconocido:', phoneNumberId);
-              return;
-            }
-
-            // ── Actualizaciones de estado ──────────────────────────────────────
-            for (const status of value.statuses || []) {
-              db.prepare(`
-                UPDATE messages SET status = ? WHERE wa_message_id = ? AND tenant_id = ?
-              `).run(status.status, status.id, tenant.id).catch(console.error);
-            }
-
-            // ── Mensajes entrantes ─────────────────────────────────────────────
-            for (const msg of value.messages || []) {
-              processInboundMessage(msg, value, tenant, req.app.get('io')).catch(console.error);
-            }
-          })
-          .catch(err => console.error('Error procesando webhook Meta:', err));
-      }
+  // 2. Procesar
+  try {
+    await processWebhookBody(body, req.app.get('io'));
+    if (queueId) {
+      db.prepare(`UPDATE webhook_queue SET status='done', processed_at=NOW() WHERE id=?`)
+        .run(queueId).catch(console.error);
     }
   } catch (err) {
     console.error('Error procesando webhook Meta:', err);
+    if (queueId) {
+      db.prepare(`UPDATE webhook_queue SET status='error', error=?, processed_at=NOW() WHERE id=?`)
+        .run(String(err), queueId).catch(console.error);
+    }
   }
 });
+
+// Lógica de procesamiento extraída para poder reutilizarla en el replay de arranque
+async function processWebhookBody(body, io) {
+  for (const entry of body.entry || []) {
+    for (const change of entry.changes || []) {
+      if (change.field !== 'messages') continue;
+      const value = change.value;
+
+      // Identificar tenant por phone_number_id
+      const phoneNumberId = value.metadata?.phone_number_id;
+      const tenant = await db.prepare('SELECT * FROM tenants WHERE wa_phone_id = ? AND active = 1').get(phoneNumberId);
+
+      if (!tenant) {
+        console.warn('Webhook recibido para phone_id desconocido:', phoneNumberId);
+        continue;
+      }
+
+      // ── Actualizaciones de estado ──────────────────────────────────────
+      for (const status of value.statuses || []) {
+        db.prepare(`
+          UPDATE messages SET status = ? WHERE wa_message_id = ? AND tenant_id = ?
+        `).run(status.status, status.id, tenant.id).catch(console.error);
+      }
+
+      // ── Mensajes entrantes ─────────────────────────────────────────────
+      for (const msg of value.messages || []) {
+        await processInboundMessage(msg, value, tenant, io).catch(console.error);
+      }
+    }
+  }
+}
 
 async function processInboundMessage(msg, value, tenant, io) {
   const waId   = normalizePhone(msg.from);
@@ -229,4 +259,34 @@ async function processInboundMessage(msg, value, tenant, io) {
   }).catch(console.error);
 }
 
+// Reprocesa entradas que quedaron en status='pending' (servidor caído a mitad)
+// Llamar desde index.js justo después de initSchema().
+async function replayPendingWebhooks(io) {
+  try {
+    const pending = await db.prepare(
+      `SELECT * FROM webhook_queue WHERE status='pending' ORDER BY created_at ASC`
+    ).all();
+
+    if (pending.length === 0) return;
+    console.log(`🔁 Reprocesando ${pending.length} webhook(s) pendiente(s) de antes del reinicio...`);
+
+    for (const row of pending) {
+      try {
+        const body = JSON.parse(row.payload);
+        await processWebhookBody(body, io);
+        await db.prepare(`UPDATE webhook_queue SET status='done', processed_at=NOW() WHERE id=?`)
+          .run(row.id);
+        console.log(`  ✅ webhook_queue #${row.id} reprocesado`);
+      } catch (err) {
+        console.error(`  ❌ webhook_queue #${row.id} error al reprocesar:`, err);
+        await db.prepare(`UPDATE webhook_queue SET status='error', error=?, processed_at=NOW() WHERE id=?`)
+          .run(String(err), row.id).catch(console.error);
+      }
+    }
+  } catch (err) {
+    console.error('Error en replayPendingWebhooks:', err);
+  }
+}
+
 module.exports = router;
+module.exports.replayPendingWebhooks = replayPendingWebhooks;
