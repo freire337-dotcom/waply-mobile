@@ -28,12 +28,13 @@ async function compressVideo(buffer) {
         .videoBitrate(TARGET_KBPS)
         .audioCodec('aac')
         .audioBitrate('96k')
-        // Máx 720p, mantiene relación de aspecto
-        .videoFilters('scale=trunc(min(iw\\,1280)/2)*2:trunc(ow/a/2)*2')
+        // Máx 480p — menos memoria que 720p y suficiente para WhatsApp
+        .videoFilters('scale=trunc(min(iw\\,854)/2)*2:trunc(ow/a/2)*2')
         .outputOptions([
-          '-preset fast',
-          '-movflags +faststart', // reproduce antes de descargar completamente
-          '-pix_fmt yuv420p',     // compatibilidad máxima
+          '-preset ultrafast', // mínimo uso de CPU/RAM (Railway mata el proceso con fast/medium)
+          '-threads 1',        // un solo hilo — Railway tiene RAM limitada
+          '-movflags +faststart',
+          '-pix_fmt yuv420p',
         ])
         .format('mp4')
         .on('error', reject)
