@@ -95,6 +95,10 @@ export const editMessage = (id: number, body: string) =>
 export const deleteMessage = (id: number) =>
   api.delete(`/messages/${id}`).then(r => r.data);
 
+// Reenviar un mensaje a otra conversación
+export const forwardMessage = (msgId: number, targetConvId: number) =>
+  api.post(`/messages/${msgId}/forward`, { target_conv_id: targetConvId }).then(r => r.data.message);
+
 // Alta manual de contacto/conversación (lead que nunca escribió solo por WhatsApp).
 // No envía ningún mensaje — solo crea el registro para poder escribirle desde aquí.
 export const createConversation = (data: { name?: string; phone: string }) =>

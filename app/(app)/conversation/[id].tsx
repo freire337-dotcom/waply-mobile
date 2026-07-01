@@ -10,11 +10,12 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
+import * as Clipboard from 'expo-clipboard';
 import {
   getConversation, getMessages, sendMessage, sendMedia,
-  patchConversation, getAgents, PIPELINE_STAGES,
+  patchConversation, getAgents, getConversations, PIPELINE_STAGES,
   getConversationTasks, createConversationTask, patchTask, deleteTask,
-  ConversationTask, editMessage, deleteMessage,
+  ConversationTask, editMessage, deleteMessage, forwardMessage,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -53,6 +54,13 @@ export default function ConversationScreen() {
   const [editingMessage, setEditingMessage] = useState<any>(null);
   const [editText, setEditText]         = useState('');
   const [savingEdit, setSavingEdit]     = useState(false);
+
+  // Reenviar mensaje a otra conversación
+  const [showForward, setShowForward]         = useState(false);
+  const [forwardConvs, setForwardConvs]       = useState<any[]>([]);
+  const [forwardSearch, setForwardSearch]     = useState('');
+  const [forwarding, setForwarding]           = useState(false);
+  const [forwardSourceMsg, setForwardSourceMsg] = useState<any>(null);
 
   // Responder a un mensaje (quote/reply de WhatsApp)
   const [replyingTo, setReplyingTo] = useState<{
@@ -188,6 +196,42 @@ export default function ConversationScreen() {
       Alert.alert('Error', err?.response?.data?.error || 'No se pudo editar el mensaje');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleCopyMessage = async () => {
+    if (!actionMessage?.body) return;
+    await Clipboard.setStringAsync(actionMessage.body);
+    setActionMessage(null);
+    Alert.alert('✓ Copiado', 'Texto copiado al portapapeles');
+  };
+
+  const openForwardPicker = async () => {
+    setForwardSourceMsg(actionMessage);
+    setActionMessage(null);
+    setForwardSearch('');
+    try {
+      const data = await getConversations({ status: 'all', page: 1 });
+      const list = (data.conversations || data).filter((c: any) => c.id !== convId);
+      setForwardConvs(list);
+    } catch {
+      setForwardConvs([]);
+    }
+    setShowForward(true);
+  };
+
+  const handleForwardTo = async (targetConvId: number, contactName: string) => {
+    if (!forwardSourceMsg || forwarding) return;
+    setForwarding(true);
+    try {
+      await forwardMessage(forwardSourceMsg.id, targetConvId);
+      setShowForward(false);
+      setForwardSourceMsg(null);
+      Alert.alert('✓ Reenviado', `Mensaje reenviado a ${contactName}`);
+    } catch (err: any) {
+      Alert.alert('Error', err?.response?.data?.error || 'No se pudo reenviar el mensaje');
+    } finally {
+      setForwarding(false);
     }
   };
 
@@ -737,6 +781,20 @@ export default function ConversationScreen() {
                 <Text style={[styles.stageOptionText, { color: '#128C7E' }]}>Responder</Text>
               </TouchableOpacity>
             )}
+            {/* Copiar texto — solo si el mensaje tiene cuerpo de texto */}
+            {!!actionMessage?.body && actionMessage?.type !== 'image' && actionMessage?.type !== 'video' && actionMessage?.type !== 'audio' && (
+              <TouchableOpacity style={styles.stageOptionRow} onPress={handleCopyMessage}>
+                <Ionicons name="copy-outline" size={18} color="#555" />
+                <Text style={styles.stageOptionText}>Copiar texto</Text>
+              </TouchableOpacity>
+            )}
+            {/* Reenviar — texto e imágenes/archivos con media_url */}
+            {(!!actionMessage?.body || !!actionMessage?.media_url) && (
+              <TouchableOpacity style={styles.stageOptionRow} onPress={openForwardPicker}>
+                <Ionicons name="arrow-redo-outline" size={18} color="#555" />
+                <Text style={styles.stageOptionText}>Reenviar</Text>
+              </TouchableOpacity>
+            )}
             {isAdmin && canEditMessage(actionMessage) && (
               <TouchableOpacity style={styles.stageOptionRow} onPress={openEditMessage}>
                 <Ionicons name="pencil-outline" size={18} color="#111" />
@@ -754,6 +812,57 @@ export default function ConversationScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Modal reenviar mensaje — picker de conversaciones */}
+      <Modal visible={showForward} transparent animationType="slide" onRequestClose={() => setShowForward(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalBox, { maxHeight: '75%' }]}>
+            <Text style={styles.modalTitle}>Reenviar a...</Text>
+            <View style={{ paddingHorizontal: 16, paddingVertical: 8 }}>
+              <TextInput
+                style={[styles.newTaskInput, { marginBottom: 0 }]}
+                placeholder="Buscar contacto..."
+                placeholderTextColor="#aaa"
+                value={forwardSearch}
+                onChangeText={setForwardSearch}
+                autoFocus
+              />
+            </View>
+            <ScrollView>
+              {forwardConvs
+                .filter(c => {
+                  const q = forwardSearch.toLowerCase();
+                  return !q || (c.contact_name || '').toLowerCase().includes(q) || (c.wa_id || '').includes(q);
+                })
+                .slice(0, 30)
+                .map(c => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={styles.agentRow}
+                    onPress={() => handleForwardTo(c.id, c.contact_name || c.wa_id)}
+                    disabled={forwarding}
+                  >
+                    <Text style={styles.agentName}>{c.contact_name || c.wa_id}</Text>
+                    {c.last_message ? (
+                      <Text style={styles.agentEmail} numberOfLines={1}>{c.last_message}</Text>
+                    ) : null}
+                  </TouchableOpacity>
+                ))}
+              {forwardConvs.length === 0 && (
+                <Text style={[styles.emptyTasksText, { padding: 20 }]}>Sin conversaciones</Text>
+              )}
+            </ScrollView>
+            {forwarding && (
+              <View style={{ padding: 12, alignItems: 'center' }}>
+                <ActivityIndicator size="small" color="#128C7E" />
+              </View>
+            )}
+            <TouchableOpacity style={styles.modalClose} onPress={() => { setShowForward(false); setForwardSourceMsg(null); }}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       {/* Modal editar mensaje */}
