@@ -99,6 +99,16 @@ export const deleteMessage = (id: number) =>
 export const forwardMessage = (msgId: number, targetConvId: number) =>
   api.post(`/messages/${msgId}/forward`, { target_conv_id: targetConvId }).then(r => r.data.message);
 
+// ── Notificaciones in-app ─────────────────────────────────────────────────────
+export const getNotifications = () =>
+  api.get('/notifications').then(r => r.data as { notifications: any[]; unread: number });
+
+export const markNotificationRead = (id: number) =>
+  api.patch(`/notifications/${id}/read`).then(r => r.data);
+
+export const markAllNotificationsRead = () =>
+  api.post('/notifications/read-all').then(r => r.data);
+
 // Alta manual de contacto/conversación (lead que nunca escribió solo por WhatsApp).
 // No envía ningún mensaje — solo crea el registro para poder escribirle desde aquí.
 export const createConversation = (data: { name?: string; phone: string }) =>

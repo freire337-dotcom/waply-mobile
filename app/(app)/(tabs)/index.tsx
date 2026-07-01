@@ -24,10 +24,10 @@ export default function ConversationsScreen() {
   const [refreshing, setRefreshing]       = useState(false);
   const setUnreadTotal                    = useUnreadStore(s => s.setTotal);
 
-  // Alta manual de contacto — para leads que nunca escribieron solos por
-  // WhatsApp (ej. rellenaron el formulario del anuncio pero no llegaron a
-  // enviar el mensaje) y el agente quiere darlos de alta con el teléfono que
-  // sí tiene. No envía ningún mensaje, solo crea el contacto/conversación.
+  // Buscador de contactos — filtra la lista cargada por nombre o teléfono
+  const [search, setSearch] = useState('');
+
+  // Alta manual de contacto
   const [showNewContact, setShowNewContact] = useState(false);
   const [newName, setNewName]             = useState('');
   const [newPhone, setNewPhone]           = useState('');
@@ -92,9 +92,40 @@ export default function ConversationsScreen() {
   // Reflejar el total en la tab bar (badge), igual que Callbell
   useEffect(() => { setUnreadTotal(totalUnread); }, [totalUnread, setUnreadTotal]);
 
+  // Filtrar conversaciones según el texto de búsqueda (cliente-side)
+  const visibleConversations = search.trim()
+    ? conversations.filter(c => {
+        const q = search.toLowerCase();
+        return (
+          (c.contact_name || '').toLowerCase().includes(q) ||
+          (c.wa_id || '').includes(q) ||
+          (c.last_message || '').toLowerCase().includes(q)
+        );
+      })
+    : conversations;
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#075E54" />
+
+      {/* Buscador */}
+      <View style={styles.searchBar}>
+        <Ionicons name="search" size={16} color="#aaa" style={{ marginRight: 6 }} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Buscar contacto o conversación..."
+          placeholderTextColor="#aaa"
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+          clearButtonMode="while-editing"
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Ionicons name="close-circle" size={16} color="#aaa" />
+          </TouchableOpacity>
+        )}
+      </View>
 
       {/* Filtros */}
       <View style={styles.filters}>
@@ -126,7 +157,7 @@ export default function ConversationsScreen() {
         </View>
       ) : (
         <FlatList
-          data={conversations}
+          data={visibleConversations}
           keyExtractor={item => String(item.id)}
           renderItem={({ item }) => (
             <ConversationItem
@@ -203,6 +234,24 @@ export default function ConversationsScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
+
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#075E54',
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  searchInput: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    fontSize: 14,
+    color: '#fff',
+  },
 
   filters: {
     flexDirection: 'row',
