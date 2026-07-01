@@ -144,6 +144,7 @@ async function checkConversationTasks() {
 // o sale un mensaje nuevo (ver routes/messages.js, webhook/meta.js, action-handlers.js),
 // así que si el contacto responde o le volvemos a escribir, el ciclo se reinicia.
 async function checkNoResponse24h() {
+  console.log('⏰ [CRON] Revisando conversaciones sin respuesta en 12h...');
   const rows = await db.prepare(`
     SELECT c.id AS conversation_id, c.tenant_id, c.lead_id,
            ct.id AS contact_id, ct.wa_id, ct.name AS contact_name
@@ -205,12 +206,10 @@ function startCronJobs() {
   // Job 4: cada 30 minutos (sin respuesta en 24h)
   setInterval(() => checkNoResponse24h().catch(console.error), 30 * 60 * 1000);
 
-  // Ejecutar inmediatamente al arrancar (para dev)
-  if (process.env.NODE_ENV !== 'production') {
-    checkExpiredTimers().catch(console.error);
-    checkConversationTasks().catch(console.error);
-    checkNoResponse24h().catch(console.error);
-  }
+  // Ejecutar inmediatamente al arrancar
+  checkExpiredTimers().catch(console.error);
+  checkConversationTasks().catch(console.error);
+  checkNoResponse24h().catch(console.error);
 
   console.log('✅ Cron jobs iniciados');
 }
