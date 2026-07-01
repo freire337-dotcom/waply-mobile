@@ -80,7 +80,7 @@ router.post('/', auth, async (req, res) => {
       // Actualizar existente
       await db.prepare(`
         UPDATE agents
-        SET name = ?, ai_system_prompt = ?, ai_model = ?, active = true
+        SET name = ?, ai_system_prompt = ?, ai_model = ?, active = 1
         WHERE id = ?
       `).run(
         name || agentRow.name,
@@ -146,7 +146,7 @@ router.post('/assign/:convId', auth, async (req, res) => {
     const { convId } = req.params;
 
     const aiAgent = await db.prepare(
-      'SELECT id FROM agents WHERE tenant_id = ? AND is_ai_agent = true AND active = true LIMIT 1'
+      'SELECT id FROM agents WHERE tenant_id = ? AND is_ai_agent = true AND active = 1 LIMIT 1'
     ).get(tid);
     if (!aiAgent) return res.status(404).json({ error: 'Agente IA no configurado o inactivo' });
 
