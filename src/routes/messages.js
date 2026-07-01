@@ -250,6 +250,68 @@ router.post('/:convId/messages', auth, async (req, res) => {
   }
 });
 
+// POST /api/messages/:id/forward — reenviar un mensaje a otra conversación
+router.post('/:id/forward', auth, async (req, res) => {
+  try {
+    const { target_conv_id } = req.body;
+    if (!target_conv_id) return res.status(400).json({ error: 'target_conv_id requerido' });
+    const tid = req.agent.tenant_id;
+
+    // Mensaje origen
+    const msg = await db.prepare(`
+      SELECT m.* FROM messages m
+      JOIN conversations c ON c.id = m.conversation_id
+      WHERE m.id = ? AND c.tenant_id = ?
+    `).get(req.params.id, tid);
+    if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
+
+    // Conversación destino
+    const targetConv = await db.prepare(`
+      SELECT c.*, ct.wa_id FROM conversations c
+      JOIN contacts ct ON ct.id = c.contact_id
+      WHERE c.id = ? AND c.tenant_id = ?
+    `).get(target_conv_id, tid);
+    if (!targetConv) return res.status(404).json({ error: 'Conversación destino no encontrada' });
+
+    // Enviar según tipo
+    let waMessageId;
+    if (msg.type === 'text') {
+      if (!msg.body) return res.status(400).json({ error: 'El mensaje no tiene texto' });
+      waMessageId = await wa.sendText(tid, targetConv.wa_id, msg.body);
+    } else if (['image', 'video', 'audio', 'document'].includes(msg.type) && msg.media_url) {
+      waMessageId = await wa.sendMedia(tid, targetConv.wa_id, msg.type, msg.media_url);
+    } else {
+      return res.status(400).json({ error: 'No se puede reenviar este tipo de mensaje' });
+    }
+
+    // Guardar en BD
+    const insert = await db.prepare(`
+      INSERT INTO messages (tenant_id, conversation_id, wa_message_id, direction, type, body, media_url, media_mime, status, sender_id)
+      VALUES (?, ?, ?, 'outbound', ?, ?, ?, ?, 'sent', ?)
+    `).run(tid, target_conv_id, waMessageId || null, msg.type, msg.body || null, msg.media_url || null, msg.media_mime || null, req.agent.id);
+
+    await db.prepare(`
+      UPDATE conversations
+      SET last_message = ?, last_msg_at = NOW(), status = 'open', followup_24h_sent = false
+      WHERE id = ?
+    `).run(msg.body || `[${msg.type}]`, target_conv_id);
+
+    const newMsg = await db.prepare(`
+      SELECT m.*, a.name AS sender_name FROM messages m
+      LEFT JOIN agents a ON a.id = m.sender_id
+      WHERE m.id = ?
+    `).get(insert.lastInsertRowid);
+
+    req.app.get('io').to(`conv:${target_conv_id}`).emit('message:new', newMsg);
+
+    res.status(201).json({ message: newMsg });
+  } catch (err) {
+    const detail = err.response?.data || err.message;
+    console.error('Error reenviando mensaje:', detail);
+    res.status(502).json({ error: 'Error reenviando mensaje', detail });
+  }
+});
+
 // PATCH /api/messages/:id — editar texto de un mensaje saliente (solo admin)
 router.patch('/:id', auth, async (req, res) => {
   try {
