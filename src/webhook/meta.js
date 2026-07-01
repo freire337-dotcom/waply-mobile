@@ -12,6 +12,7 @@ const wa      = require('../services/whatsapp');
 const { pushToCRM } = require('../services/crm-sync');
 const { respondIfAIAgent } = require('../services/ai-agent');
 const { normalizePhone } = require('../utils/phone');
+const { saveNotification } = require('../services/notifications');
 
 // GET /webhook/meta — verificación (Meta usa un solo verify token global)
 router.get('/', async (req, res) => {
@@ -134,12 +135,22 @@ async function processInboundMessage(msg, value, tenant, io) {
 
   // Upsert conversación
   let conv = await db.prepare('SELECT * FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tenant.id, contact.id);
+  const isNewConversation = !conv;
   if (!conv) {
     const ins = await db.prepare(`
       INSERT INTO conversations (tenant_id, contact_id, lead_id, status)
       VALUES (?, ?, ?, 'open')
     `).run(tenant.id, contact.id, contact.lead_id || null);
     conv = await db.prepare('SELECT * FROM conversations WHERE id = ?').get(ins.lastInsertRowid);
+    // Notificación in-app: nuevo lead
+    saveNotification({
+      tenantId:       tenant.id,
+      agentId:        null, // visible para todos los agentes del tenant
+      type:           'new_lead',
+      title:          '🟢 Nuevo lead',
+      body:           contact.name || waId,
+      conversationId: conv.id,
+    });
   }
 
   // Extraer contenido del mensaje

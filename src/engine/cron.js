@@ -10,6 +10,7 @@
 const db       = require('../db');
 const engine   = require('./automation-engine');
 const whatsapp = require('../services/whatsapp');
+const { saveNotification } = require('../services/notifications');
 
 // ── Utilidades de tiempo ──────────────────────────────────────────────────────
 function startOfDay(date) {
@@ -130,6 +131,15 @@ async function checkConversationTasks() {
         );
       }
       await db.prepare('UPDATE conversation_tasks SET reminder_sent = 1 WHERE id = ?').run(task.id);
+      // Notificación in-app: recordatorio de tarea
+      await saveNotification({
+        tenantId:       task.tenant_id,
+        agentId:        task.agent_id || null,
+        type:           'task_reminder',
+        title:          '⏰ Recordatorio de tarea',
+        body:           `${task.title}${task.contact_name ? ` — ${task.contact_name}` : ''}`,
+        conversationId: task.conversation_id,
+      });
       console.log(`  ✅ Recordatorio de tarea enviado: #${task.id}`);
     } catch (err) {
       console.error(`  ❌ Error recordatorio tarea #${task.id}:`, err.message);
@@ -167,6 +177,15 @@ async function checkNoResponse24h() {
         lead_id:         row.lead_id,
       });
       await db.prepare('UPDATE conversations SET followup_24h_sent = true WHERE id = ?').run(row.conversation_id);
+      // Notificación in-app: sin respuesta 12h
+      await saveNotification({
+        tenantId:       row.tenant_id,
+        agentId:        null,
+        type:           'no_response',
+        title:          '🕐 Sin respuesta 12h',
+        body:           row.contact_name || row.wa_id,
+        conversationId: row.conversation_id,
+      });
       console.log(`  ✅ Trigger "sin respuesta 24h" disparado: conversación #${row.conversation_id}`);
     } catch (err) {
       console.error(`  ❌ Error en trigger sin respuesta 24h conv #${row.conversation_id}:`, err.message);

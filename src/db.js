@@ -227,6 +227,22 @@ async function initSchema() {
       UNIQUE(tenant_id)
     );
 
+    -- Historial de notificaciones en la app móvil
+    -- agent_id NULL = visible para todos los agentes del tenant (ej. nuevo lead sin asignar)
+    -- agent_id X    = solo para ese agente (ej. recordatorio de su propia tarea)
+    CREATE TABLE IF NOT EXISTS notifications (
+      id              SERIAL PRIMARY KEY,
+      tenant_id       INTEGER NOT NULL,
+      agent_id        INTEGER,  -- null = todos los agentes del tenant
+      type            TEXT NOT NULL,  -- 'new_lead' | 'task_reminder' | 'no_response'
+      title           TEXT NOT NULL,
+      body            TEXT,
+      conversation_id INTEGER,  -- para navegar al chat al tocar
+      read            BOOLEAN NOT NULL DEFAULT false,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_notif_tenant ON notifications(tenant_id, agent_id, created_at DESC);
+
     CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
     CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);
