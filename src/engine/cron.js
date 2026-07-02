@@ -168,6 +168,7 @@ async function checkNoResponse24h() {
       AND c.last_msg_at <= NOW() - INTERVAL '12 hours'
       AND lm.direction = 'outbound'
   `).all();
+  console.log(`⏰ [CRON] Sin respuesta 12h: ${rows.length} conversación(es) candidata(s)`);
 
   for (const row of rows) {
     try {
