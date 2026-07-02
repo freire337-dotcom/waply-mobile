@@ -51,12 +51,15 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
     console.log(`[AI Agent] config OK — provider=${config.provider}`);
 
     // 3. Obtener historial de mensajes (últimos 30 para contexto)
-    const rows = await db.prepare(`
+    // IMPORTANTE: ORDER BY DESC + LIMIT para coger los más recientes,
+    // luego invertimos para mantener el orden cronológico para la IA.
+    const rowsDesc = await db.prepare(`
       SELECT direction, type, body FROM messages
       WHERE conversation_id = ? AND type IN ('text', 'template')
-      ORDER BY created_at ASC
+      ORDER BY created_at DESC
       LIMIT 30
     `).all(convId);
+    const rows = rowsDesc.reverse();
 
     console.log(`[AI Agent] ${rows.length} mensajes de historial`);
 
