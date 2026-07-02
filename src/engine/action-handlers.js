@@ -106,7 +106,16 @@ async function sendWhatsapp({ tenantId, action, context }) {
       return context[obj]?.[key] || '';
     }
   );
-  const resolvedComponents = components.map(comp => ({
+  // Si no se configuraron components pero la plantilla puede tener parámetros,
+  // inyectamos automáticamente el nombre del contacto como {{1}} en el BODY.
+  // Esto evita el error Meta 132000 en plantillas de seguimiento estándar.
+  const effectiveComponents = components.length > 0 ? components : (
+    type === 'template' ? [{
+      type: 'body',
+      parameters: [{ type: 'text', text: '{{contact.name}}' }],
+    }] : []
+  );
+  const resolvedComponents = effectiveComponents.map(comp => ({
     ...comp,
     parameters: (comp.parameters || []).map(p =>
       p.type === 'text' ? { ...p, text: resolveText(p.text) } : p
