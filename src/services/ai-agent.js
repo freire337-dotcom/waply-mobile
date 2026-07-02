@@ -90,31 +90,41 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
       `Eres un asistente de atención al cliente. El cliente se llama ${contactName || 'Cliente'}. Responde de forma amable, concisa y útil en el mismo idioma que use el cliente. Si no sabes algo, dilo honestamente y ofrece derivar con un agente humano.`;
 
     // 5. Llamar a la IA
-    console.log(`[AI Agent] Llamando a IA... model=${conv.ai_model || 'claude-3-5-haiku-20241022'}`);
+    const model = conv.ai_model || 'claude-3-5-haiku-20241022';
+    console.log(`[AI Agent] Llamando a IA... provider=${config.provider} model=${model}`);
+    const axios = require('axios');
     let responseText;
 
     if (config.provider === 'openai') {
-      // OpenAI (opcional — instalar npm i openai si se usa)
-      let OpenAI;
-      try { OpenAI = require('openai'); } catch { throw new Error('Paquete openai no instalado'); }
-      const openai = new OpenAI({ apiKey: config.api_key });
-      const completion = await openai.chat.completions.create({
-        model: conv.ai_model || 'gpt-4o-mini',
-        messages: [{ role: 'system', content: systemPrompt }, ...apiMessages],
-        max_tokens: 500,
-      });
-      responseText = completion.choices[0]?.message?.content;
+      const resp = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model: model || 'gpt-4o-mini',
+          messages: [{ role: 'system', content: systemPrompt }, ...apiMessages],
+          max_tokens: 500,
+        },
+        { headers: { Authorization: `Bearer ${config.api_key.trim()}`, 'Content-Type': 'application/json' } }
+      );
+      responseText = resp.data.choices?.[0]?.message?.content;
     } else {
-      // Anthropic (por defecto)
-      const Anthropic = require('@anthropic-ai/sdk');
-      const anthropic = new Anthropic({ apiKey: config.api_key });
-      const response = await anthropic.messages.create({
-        model: conv.ai_model || 'claude-3-5-haiku-20241022',
-        max_tokens: 500,
-        system: systemPrompt,
-        messages: apiMessages,
-      });
-      responseText = response.content?.[0]?.text;
+      // Anthropic — llamada directa con axios para evitar problemas del SDK
+      const resp = await axios.post(
+        'https://api.anthropic.com/v1/messages',
+        {
+          model,
+          max_tokens: 500,
+          system: systemPrompt,
+          messages: apiMessages,
+        },
+        {
+          headers: {
+            'x-api-key':         config.api_key.trim(),
+            'anthropic-version': '2023-06-01',
+            'Content-Type':      'application/json',
+          },
+        }
+      );
+      responseText = resp.data.content?.[0]?.text;
     }
 
     if (!responseText?.trim()) {
@@ -159,7 +169,9 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
 
     console.log(`[AI Agent] 🤖 Respondió a conv ${convId} del tenant ${tenantId}`);
   } catch (err) {
-    console.error('[AI Agent] Error al responder:', err.message || err);
+    // Si es error de axios, muestra la respuesta exacta de la API (Anthropic/OpenAI)
+    const apiErr = err.response?.data;
+    console.error(`[AI Agent] ❌ Error al responder: ${err.message}`, apiErr ? JSON.stringify(apiErr) : '');
   }
 }
 
