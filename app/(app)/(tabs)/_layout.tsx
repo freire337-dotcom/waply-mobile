@@ -29,10 +29,20 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="contacts"
+        options={{
+          title: 'Contactos',
+          tabBarLabel: 'Contactos',
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="notifications"
         options={{
           title: 'Notificaciones',
-          tabBarLabel: 'Notificaciones',
+          tabBarLabel: 'Avisos',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="notifications" size={size} color={color} />
           ),
