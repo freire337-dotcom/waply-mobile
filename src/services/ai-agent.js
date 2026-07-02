@@ -21,6 +21,8 @@ const { getIO } = require('../io');
  */
 async function respondIfAIAgent(tenantId, convId, contactName) {
   try {
+    console.log(`[AI Agent] ▶ respondIfAIAgent convId=${convId} tenantId=${tenantId}`);
+
     // 1. Verificar que la conv está asignada a un agente IA
     const conv = await db.prepare(`
       SELECT c.*, ct.wa_id, a.is_ai_agent, a.ai_system_prompt, a.ai_model, a.id AS ai_agent_id, a.name AS ai_agent_name
@@ -30,7 +32,12 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
       WHERE c.id = ? AND c.tenant_id = ?
     `).get(convId, tenantId);
 
-    if (!conv || !conv.is_ai_agent || !conv.assigned_to) return;
+    console.log(`[AI Agent] conv encontrada: assigned_to=${conv?.assigned_to}, is_ai_agent=${conv?.is_ai_agent}`);
+
+    if (!conv || !conv.is_ai_agent || !conv.assigned_to) {
+      console.log(`[AI Agent] ⏭ Saltando: conv=${!!conv} is_ai_agent=${conv?.is_ai_agent} assigned_to=${conv?.assigned_to}`);
+      return;
+    }
 
     // 2. Obtener API key del tenant
     const config = await db.prepare(
@@ -38,9 +45,10 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
     ).get(tenantId);
 
     if (!config?.api_key) {
-      console.warn(`[AI Agent] tenant ${tenantId} no tiene api_key configurada`);
+      console.warn(`[AI Agent] ⚠ tenant ${tenantId} no tiene api_key configurada`);
       return;
     }
+    console.log(`[AI Agent] config OK — provider=${config.provider}`);
 
     // 3. Obtener historial de mensajes (últimos 30 para contexto)
     const rows = await db.prepare(`
@@ -49,6 +57,8 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
       ORDER BY created_at ASC
       LIMIT 30
     `).all(convId);
+
+    console.log(`[AI Agent] ${rows.length} mensajes de historial`);
 
     // 4. Construir lista de mensajes para la API
     //    inbound = user, outbound = assistant
@@ -65,13 +75,19 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
       }
     }
 
+    console.log(`[AI Agent] apiMessages: ${apiMessages.length} — último rol: ${apiMessages.at(-1)?.role}`);
+
     // Solo respondemos si el último mensaje es del usuario
-    if (!apiMessages.length || apiMessages[apiMessages.length - 1].role !== 'user') return;
+    if (!apiMessages.length || apiMessages[apiMessages.length - 1].role !== 'user') {
+      console.log(`[AI Agent] ⏭ Último mensaje no es del usuario — abortando`);
+      return;
+    }
 
     const systemPrompt = conv.ai_system_prompt ||
       `Eres un asistente de atención al cliente. El cliente se llama ${contactName || 'Cliente'}. Responde de forma amable, concisa y útil en el mismo idioma que use el cliente. Si no sabes algo, dilo honestamente y ofrece derivar con un agente humano.`;
 
     // 5. Llamar a la IA
+    console.log(`[AI Agent] Llamando a IA... model=${conv.ai_model || 'claude-3-5-haiku-20241022'}`);
     let responseText;
 
     if (config.provider === 'openai') {
