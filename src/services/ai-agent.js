@@ -90,7 +90,16 @@ async function respondIfAIAgent(tenantId, convId, contactName) {
       `Eres un asistente de atención al cliente. El cliente se llama ${contactName || 'Cliente'}. Responde de forma amable, concisa y útil en el mismo idioma que use el cliente. Si no sabes algo, dilo honestamente y ofrece derivar con un agente humano.`;
 
     // 5. Llamar a la IA
-    const model = conv.ai_model || 'claude-haiku-4-5-20251001';
+    // Mapa de modelos deprecados → actuales (Anthropic renombra modelos periódicamente)
+    const MODEL_ALIASES = {
+      'claude-3-5-haiku-20241022':  'claude-haiku-4-5-20251001',
+      'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+      'claude-3-opus-20240229':     'claude-opus-4-8',
+      'claude-opus-4-5':            'claude-opus-4-8',
+    };
+    const rawModel = conv.ai_model || 'claude-haiku-4-5-20251001';
+    const model    = MODEL_ALIASES[rawModel] || rawModel;
+    if (model !== rawModel) console.log(`[AI Agent] Modelo migrado: ${rawModel} → ${model}`);
     console.log(`[AI Agent] Llamando a IA... provider=${config.provider} model=${model}`);
     const axios = require('axios');
     let responseText;
