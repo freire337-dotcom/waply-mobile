@@ -73,7 +73,7 @@ router.post('/', auth, async (req, res) => {
         `ai-bot-${tid}@waply.internal`,
         hash,
         system_prompt || null,
-        ai_model || 'claude-3-5-haiku-20241022',
+        ai_model || 'claude-haiku-4-5-20251001',
       );
       agentRow = await db.prepare('SELECT * FROM agents WHERE id = ?').get(ins.lastInsertRowid);
     } else {
@@ -85,7 +85,7 @@ router.post('/', auth, async (req, res) => {
       `).run(
         name || agentRow.name,
         system_prompt !== undefined ? system_prompt : agentRow.ai_system_prompt,
-        ai_model || agentRow.ai_model || 'claude-3-5-haiku-20241022',
+        ai_model || agentRow.ai_model || 'claude-haiku-4-5-20251001',
         agentRow.id,
       );
       agentRow = await db.prepare('SELECT * FROM agents WHERE id = ?').get(agentRow.id);
