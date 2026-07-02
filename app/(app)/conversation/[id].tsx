@@ -512,6 +512,7 @@ export default function ConversationScreen() {
         )}
         contentContainerStyle={styles.messagesList}
         onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         ListEmptyComponent={
           <View style={styles.emptyMessages}>
             <Text style={styles.emptyText}>No hay mensajes aún</Text>
