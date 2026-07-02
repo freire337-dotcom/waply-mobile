@@ -6,8 +6,11 @@ const DB_URL = process.env.DATABASE_URL
 console.log('🔍 DATABASE_URL:', DB_URL.substring(0, 40) + '...');
 
 const pool = new Pool({
-  connectionString: DB_URL,
-  ssl: { rejectUnauthorized: false },
+  connectionString:        DB_URL,
+  ssl:                     { rejectUnauthorized: false },
+  max:                     20,               // más conexiones paralelas (default: 10)
+  idleTimeoutMillis:       30_000,           // libera conexiones ociosas tras 30s
+  connectionTimeoutMillis: 8_000,            // error en vez de colgar si la BD no responde
 });
 
 // Convierte ? placeholders a $1, $2, ... para PostgreSQL
@@ -243,13 +246,21 @@ async function initSchema() {
     );
     CREATE INDEX IF NOT EXISTS idx_notif_tenant ON notifications(tenant_id, agent_id, created_at DESC);
 
-    CREATE INDEX IF NOT EXISTS idx_messages_conv     ON messages(conversation_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_conv_tenant       ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
-    CREATE INDEX IF NOT EXISTS idx_timers_pending    ON automation_timers(status, execute_at);
-    CREATE INDEX IF NOT EXISTS idx_appointments_date ON appointments(tenant_id, scheduled_at, status);
-    CREATE INDEX IF NOT EXISTS idx_contacts_tenant   ON contacts(tenant_id, wa_id);
-    CREATE INDEX IF NOT EXISTS idx_tasks_conv        ON conversation_tasks(conversation_id, status);
-    CREATE INDEX IF NOT EXISTS idx_tasks_due         ON conversation_tasks(status, reminder_sent, due_at);
+    CREATE INDEX IF NOT EXISTS idx_messages_conv       ON messages(conversation_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_conv_tenant         ON conversations(tenant_id, status, last_msg_at DESC NULLS LAST);
+    CREATE INDEX IF NOT EXISTS idx_timers_pending      ON automation_timers(status, execute_at);
+    CREATE INDEX IF NOT EXISTS idx_appointments_date   ON appointments(tenant_id, scheduled_at, status);
+    CREATE INDEX IF NOT EXISTS idx_contacts_tenant     ON contacts(tenant_id, wa_id);
+    CREATE INDEX IF NOT EXISTS idx_tasks_conv          ON conversation_tasks(conversation_id, status);
+    CREATE INDEX IF NOT EXISTS idx_tasks_due           ON conversation_tasks(status, reminder_sent, due_at);
+    -- PostgreSQL NO crea índices automáticamente en FK — los añadimos para acelerar
+    -- los JOINs y filtros más frecuentes (conversations→contacts, conversations→agents,
+    -- messages→sender, conversations por assigned_to).
+    CREATE INDEX IF NOT EXISTS idx_conv_contact_id     ON conversations(contact_id);
+    CREATE INDEX IF NOT EXISTS idx_conv_assigned_to    ON conversations(assigned_to);
+    CREATE INDEX IF NOT EXISTS idx_messages_sender     ON messages(sender_id) WHERE sender_id IS NOT NULL;
+    -- Índice para el panel de notificaciones (campana): acelera la query más frecuente
+    CREATE INDEX IF NOT EXISTS idx_notif_unread        ON notifications(tenant_id, read, created_at DESC);
   `);
   console.log('✅ Schema PostgreSQL inicializado');
 }

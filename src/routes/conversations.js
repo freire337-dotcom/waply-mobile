@@ -321,14 +321,16 @@ router.patch('/:id', auth, async (req, res) => {
       }
     }
 
-    if (assigned_to !== undefined)
-      await db.prepare('UPDATE conversations SET assigned_to = ? WHERE id = ?').run(assigned_to || null, req.params.id);
-    if (status)
-      await db.prepare('UPDATE conversations SET status = ? WHERE id = ?').run(status, req.params.id);
-    if (unread_count !== undefined)
-      await db.prepare('UPDATE conversations SET unread_count = ? WHERE id = ?').run(unread_count, req.params.id);
-    if (pipeline_stage !== undefined)
-      await db.prepare('UPDATE conversations SET pipeline_stage = ? WHERE id = ?').run(pipeline_stage, req.params.id);
+    // Un solo UPDATE en lugar de 4 round-trips separados
+    const setFields = [], setValues = [];
+    if (assigned_to  !== undefined) { setFields.push('assigned_to = ?');   setValues.push(assigned_to || null); }
+    if (status)                     { setFields.push('status = ?');         setValues.push(status); }
+    if (unread_count !== undefined) { setFields.push('unread_count = ?');   setValues.push(unread_count); }
+    if (pipeline_stage !== undefined){ setFields.push('pipeline_stage = ?'); setValues.push(pipeline_stage); }
+    if (setFields.length > 0) {
+      setValues.push(req.params.id);
+      await db.prepare(`UPDATE conversations SET ${setFields.join(', ')} WHERE id = ?`).run(...setValues);
+    }
 
     const updated = await db.prepare(`
       SELECT c.*, ct.name AS contact_name, ct.wa_id, a.id AS agent_id, a.name AS agent_name
