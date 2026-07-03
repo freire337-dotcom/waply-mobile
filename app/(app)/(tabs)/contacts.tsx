@@ -84,18 +84,32 @@ export default function ContactsScreen() {
         <Text style={styles.itemName} numberOfLines={1}>{item.name || 'Sin nombre'}</Text>
         <Text style={styles.itemPhone} numberOfLines={1}>{item.phone || item.wa_id}</Text>
       </View>
-      <TouchableOpacity
-        onPress={() => {
-          const num = (item.phone || item.wa_id).replace(/\D/g, '');
-          Linking.openURL(`https://wa.me/${num}`).catch(() =>
-            Alert.alert('Error', 'No se pudo abrir WhatsApp')
-          );
-        }}
-        style={styles.waBtn}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      >
-        <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
-      </TouchableOpacity>
+      <View style={styles.actions}>
+        <TouchableOpacity
+          onPress={() => {
+            const num = (item.phone || item.wa_id).replace(/\s/g, '');
+            Linking.openURL(`tel:${num}`).catch(() =>
+              Alert.alert('Error', 'No se pudo abrir el marcador')
+            );
+          }}
+          style={styles.actionBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="call-outline" size={20} color="#128C7E" />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => {
+            const num = (item.phone || item.wa_id).replace(/\D/g, '');
+            Linking.openURL(`https://wa.me/${num}`).catch(() =>
+              Alert.alert('Error', 'No se pudo abrir WhatsApp')
+            );
+          }}
+          style={styles.actionBtn}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+        </TouchableOpacity>
+      </View>
     </TouchableOpacity>
   );
 
@@ -196,7 +210,8 @@ const styles = StyleSheet.create({
   itemName:  { fontSize: 15, fontWeight: '600', color: '#111' },
   itemPhone: { fontSize: 13, color: '#666', marginTop: 2 },
 
-  waBtn: { padding: 4 },
+  actions:   { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  actionBtn: { padding: 6 },
 
   separator: { height: StyleSheet.hairlineWidth, backgroundColor: '#f0f0f0', marginLeft: 72 },
 
