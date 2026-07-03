@@ -6,12 +6,9 @@
  * upserta la URL en app_releases. GET /download siempre apunta al último build.
  */
 
-const router   = require('express').Router();
-const db       = require('../db');
-const crypto   = require('crypto');
-const https    = require('https');
-const http     = require('http');
-const { URL }  = require('url');
+const router  = require('express').Router();
+const db      = require('../db');
+const crypto  = require('crypto');
 
 // ── POST /api/eas-webhook ─────────────────────────────────────────────────────
 // EAS llama aquí automáticamente al terminar cada build (evento BUILD).
@@ -111,40 +108,12 @@ router.get('/api/releases/latest', async (req, res) => {
 });
 
 // ── GET /download/apk ────────────────────────────────────────────────────────
-// Proxy que descarga el APK desde EAS y lo sirve con Content-Disposition:attachment
-// para que Android Chrome lo descargue directamente sin pasar por expo.dev.
+// Redirect directo a la URL del APK (GitHub Releases — pública, sin auth).
 router.get('/download/apk', async (req, res) => {
   const platform = req.query.platform || 'android';
   const release  = await db.prepare('SELECT * FROM app_releases WHERE platform = ?').get(platform);
   if (!release) return res.status(404).send('Sin builds registrados');
-
-  const version = release.version ? `_${release.version}` : '';
-  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-  res.setHeader('Content-Disposition', `attachment; filename="waply${version}.apk"`);
-
-  // Sigue redirecciones y hace pipe del stream usando el módulo https nativo
-  function proxyUrl(urlStr) {
-    const parsed = new URL(urlStr);
-    const mod    = parsed.protocol === 'https:' ? https : http;
-    mod.get(urlStr, upstream => {
-      if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
-        return proxyUrl(upstream.headers.location); // sigue redirect
-      }
-      if (upstream.statusCode !== 200) {
-        res.status(502).send(`Error upstream: ${upstream.statusCode}`);
-        return;
-      }
-      if (upstream.headers['content-length']) {
-        res.setHeader('Content-Length', upstream.headers['content-length']);
-      }
-      upstream.pipe(res);
-    }).on('error', err => {
-      console.error('❌ /download/apk proxy error:', err.message);
-      if (!res.headersSent) res.status(500).send('Error al descargar el APK');
-    });
-  }
-
-  proxyUrl(release.url);
+  res.redirect(302, release.url);
 });
 
 // ── GET /download/redirect ────────────────────────────────────────────────────
