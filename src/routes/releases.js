@@ -137,6 +137,7 @@ router.get('/download', async (req, res) => {
   }
 
   const fecha = new Date(release.created_at).toLocaleString('es-ES');
+  const apkUrl = release.url;
   res.send(`
     <html>
     <head>
@@ -147,15 +148,24 @@ router.get('/download', async (req, res) => {
       <h1 style="color:#128C7E;">Waply</h1>
       <p>Última versión disponible: <strong>${release.version || '—'}</strong></p>
       <p style="color:#888;font-size:13px;">Build del ${fecha} · perfil ${release.profile}</p>
-      <a href="${release.url}"
+      <a id="dlbtn" href="${apkUrl}"
          style="display:inline-block;margin-top:20px;background:#128C7E;color:#fff;
                 padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;">
         ⬇ Descargar APK
       </a>
-      <p style="color:#aaa;font-size:11px;margin-top:12px;">
-        Después de descargarlo, abre el archivo .apk desde las notificaciones o desde Archivos.<br>
+      <p id="tip" style="display:none;color:#555;font-size:12px;margin-top:16px;max-width:300px;margin-left:auto;margin-right:auto;">
+        ✅ Descarga iniciada.<br>
+        Ábrela desde las notificaciones o desde Archivos.<br>
         Si Android lo bloquea, ve a Ajustes → Seguridad → Instalar apps desconocidas.
       </p>
+      <script>
+        // window.location funciona mejor que <a href> en Android Chrome para APKs externos
+        document.getElementById('dlbtn').addEventListener('click', function(e) {
+          e.preventDefault();
+          document.getElementById('tip').style.display = 'block';
+          window.location.href = '${apkUrl}';
+        });
+      </script>
     </body>
     </html>
   `);
