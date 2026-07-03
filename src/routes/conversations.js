@@ -84,7 +84,13 @@ router.post('/compare', auth, async (req, res) => {
       WHERE ct.tenant_id = ? AND ct.wa_id = ?
     `).get(tid, tid, waId);
 
-    if (row) {
+    if (!row) {
+      // Contacto nuevo — nunca estuvo en Waply
+      missing.push({ name, phone, wa_id: waId });
+    } else if (!row.conv_id) {
+      // Contacto existe pero sin conversación activa — se puede reimportar
+      missing.push({ name: name || row.contact_name, phone, wa_id: waId, reimport: true });
+    } else {
       existing.push({
         name:         name || row.contact_name,
         phone,
@@ -95,8 +101,6 @@ router.post('/compare', auth, async (req, res) => {
         last_msg_at:  row.last_msg_at,
         last_message: row.last_message,
       });
-    } else {
-      missing.push({ name, phone, wa_id: waId });
     }
   }
 
@@ -131,14 +135,13 @@ router.post('/bulk-import', auth, async (req, res) => {
     if (!waId) { failed.push({ name, phone, error: 'Teléfono no válido' }); continue; }
 
     try {
-      const existing = await db.prepare('SELECT id FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
-      if (existing) {
-        // No se reenvía WhatsApp, pero aprovechamos para reenganchar al CRM por si
-        // este contacto se creó antes de que bulk-import sincronizara con Supabase
-        // (por eso aparecía en Waply pero nunca en el "Whasat" del CRM).
-        try {
-          const conv = await db.prepare('SELECT id, lead_id FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tid, existing.id);
-          if (conv) {
+      const existingContact = await db.prepare('SELECT id FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
+      if (existingContact) {
+        // Comprobar si tiene conversación activa
+        const conv = await db.prepare('SELECT id, lead_id FROM conversations WHERE tenant_id = ? AND contact_id = ?').get(tid, existingContact.id);
+        if (conv) {
+          // Tiene conversación — saltar y resincronizar CRM
+          try {
             const lastMsg = await db.prepare(`
               SELECT id, wa_message_id, type, body, media_url, created_at, direction
               FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1
@@ -155,16 +158,20 @@ router.post('/bulk-import', auth, async (req, res) => {
               });
             }
           }
-        } catch (e) {
-          console.warn('bulk-import: fallo backfill CRM para existente', phone, e.message);
+          } catch (e) {
+            console.warn('bulk-import: fallo backfill CRM para existente', phone, e.message);
+          }
+          skipped.push({ name, phone, reason: 'Ya existe en Waply (resincronizado con CRM)' });
+          continue;
         }
-        skipped.push({ name, phone, reason: 'Ya existe en Waply (resincronizado con CRM)' });
-        continue;
+        // Tiene contacto pero NO conversación — se puede reimportar (caída en el flujo normal abajo)
       }
 
+      // Upsert contacto (puede ya existir sin conv)
       await db.prepare(`
         INSERT INTO contacts (tenant_id, wa_id, name, phone)
         VALUES (?, ?, ?, ?)
+        ON CONFLICT(tenant_id, wa_id) DO UPDATE SET name = COALESCE(excluded.name, contacts.name)
       `).run(tid, waId, name || null, phone);
 
       const contact = await db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND wa_id = ?').get(tid, waId);
