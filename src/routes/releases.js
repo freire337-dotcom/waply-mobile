@@ -1,13 +1,79 @@
 /**
  * Página de descarga de la app + registro del último build.
  *
- * Flujo: tras cada `eas build`, el script mobile/scripts/publish-build.sh
- * hace POST aquí con la URL real del APK. GET /download siempre redirige
- * al build más reciente — no hay que copiar/pegar enlaces a mano.
+ * Flujo automático: EAS llama a POST /api/eas-webhook al terminar cada build.
+ * El endpoint verifica la firma HMAC-SHA1 (secret en EAS_WEBHOOK_SECRET) y
+ * upserta la URL en app_releases. GET /download siempre apunta al último build.
  */
 
-const router = require('express').Router();
-const db     = require('../db');
+const router   = require('express').Router();
+const db       = require('../db');
+const crypto   = require('crypto');
+const https    = require('https');
+const http     = require('http');
+const { URL }  = require('url');
+
+// ── POST /api/eas-webhook ─────────────────────────────────────────────────────
+// EAS llama aquí automáticamente al terminar cada build (evento BUILD).
+// Registrar el webhook: eas webhook:create --event BUILD --url https://waply-backend-production.up.railway.app/api/eas-webhook
+// El secret generado va en la variable de Railway: EAS_WEBHOOK_SECRET
+router.post('/api/eas-webhook', express_raw_body, async (req, res) => {
+  try {
+    // Verificar firma HMAC-SHA1 de EAS
+    const secret = process.env.EAS_WEBHOOK_SECRET;
+    if (secret) {
+      const sig      = req.headers['expo-signature'] || '';
+      const expected = 'sha1=' + crypto.createHmac('sha1', secret).update(req.rawBody).digest('hex');
+      if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+        console.warn('⚠ EAS webhook: firma inválida');
+        return res.status(401).json({ error: 'Firma inválida' });
+      }
+    }
+
+    const body = JSON.parse(req.rawBody.toString());
+
+    // Solo procesar builds terminados con éxito
+    if (body.status !== 'finished') {
+      return res.json({ ok: true, skipped: body.status });
+    }
+
+    const apkUrl   = body.artifacts?.buildUrl;
+    const platform = body.metadata?.platform || 'android';
+    const profile  = body.metadata?.buildProfile || 'preview';
+    const version  = body.metadata?.appVersion || null;
+
+    if (!apkUrl) {
+      console.warn('⚠ EAS webhook: sin buildUrl en', JSON.stringify(body.artifacts));
+      return res.status(400).json({ error: 'Sin buildUrl' });
+    }
+
+    await db.prepare(`
+      INSERT INTO app_releases (platform, profile, version, url)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT (platform) DO UPDATE SET
+        profile    = excluded.profile,
+        version    = excluded.version,
+        url        = excluded.url,
+        created_at = NOW()
+    `).run(platform, profile, version, apkUrl);
+
+    console.log(`✅ EAS webhook: nueva release ${platform} ${version} → ${apkUrl}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('❌ EAS webhook error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Middleware para capturar el raw body (necesario para verificar firma HMAC)
+function express_raw_body(req, res, next) {
+  const chunks = [];
+  req.on('data', c => chunks.push(c));
+  req.on('end', () => {
+    req.rawBody = Buffer.concat(chunks);
+    next();
+  });
+}
 
 // ── POST /api/releases ────────────────────────────────────────────────────────
 // Registra/actualiza el último build de una plataforma. Protegido con el mismo
@@ -44,14 +110,46 @@ router.get('/api/releases/latest', async (req, res) => {
   res.json(release);
 });
 
-// ── GET /download/redirect ────────────────────────────────────────────────────
-// 302 directo a la URL del APK (sin página intermedia) — para el botón/icono
-// de la home en Lovable, así el clic dispara la descarga al instante.
-router.get('/download/redirect', async (req, res) => {
+// ── GET /download/apk ────────────────────────────────────────────────────────
+// Proxy que descarga el APK desde EAS y lo sirve con Content-Disposition:attachment
+// para que Android Chrome lo descargue directamente sin pasar por expo.dev.
+router.get('/download/apk', async (req, res) => {
   const platform = req.query.platform || 'android';
   const release  = await db.prepare('SELECT * FROM app_releases WHERE platform = ?').get(platform);
-  if (!release) return res.redirect('/download');
-  res.redirect(302, release.url);
+  if (!release) return res.status(404).send('Sin builds registrados');
+
+  const version = release.version ? `_${release.version}` : '';
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', `attachment; filename="waply${version}.apk"`);
+
+  // Sigue redirecciones y hace pipe del stream usando el módulo https nativo
+  function proxyUrl(urlStr) {
+    const parsed = new URL(urlStr);
+    const mod    = parsed.protocol === 'https:' ? https : http;
+    mod.get(urlStr, upstream => {
+      if (upstream.statusCode >= 300 && upstream.statusCode < 400 && upstream.headers.location) {
+        return proxyUrl(upstream.headers.location); // sigue redirect
+      }
+      if (upstream.statusCode !== 200) {
+        res.status(502).send(`Error upstream: ${upstream.statusCode}`);
+        return;
+      }
+      if (upstream.headers['content-length']) {
+        res.setHeader('Content-Length', upstream.headers['content-length']);
+      }
+      upstream.pipe(res);
+    }).on('error', err => {
+      console.error('❌ /download/apk proxy error:', err.message);
+      if (!res.headersSent) res.status(500).send('Error al descargar el APK');
+    });
+  }
+
+  proxyUrl(release.url);
+});
+
+// ── GET /download/redirect ────────────────────────────────────────────────────
+router.get('/download/redirect', async (req, res) => {
+  res.redirect(302, '/download/apk');
 });
 
 // ── GET /download ──────────────────────────────────────────────────────────────
@@ -80,11 +178,15 @@ router.get('/download', async (req, res) => {
       <h1 style="color:#128C7E;">Waply</h1>
       <p>Última versión disponible: <strong>${release.version || '—'}</strong></p>
       <p style="color:#888;font-size:13px;">Build del ${fecha} · perfil ${release.profile}</p>
-      <a href="${release.url}"
+      <a href="/download/apk"
          style="display:inline-block;margin-top:20px;background:#128C7E;color:#fff;
                 padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;">
-        Descargar APK
+        ⬇ Descargar APK
       </a>
+      <p style="color:#aaa;font-size:11px;margin-top:12px;">
+        Después de descargarlo, abre el archivo .apk desde las notificaciones o desde Archivos.<br>
+        Si Android lo bloquea, ve a Ajustes → Seguridad → Instalar apps desconocidas.
+      </p>
     </body>
     </html>
   `);
