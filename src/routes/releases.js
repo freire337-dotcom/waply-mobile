@@ -147,7 +147,7 @@ router.get('/download', async (req, res) => {
       <h1 style="color:#128C7E;">Waply</h1>
       <p>Última versión disponible: <strong>${release.version || '—'}</strong></p>
       <p style="color:#888;font-size:13px;">Build del ${fecha} · perfil ${release.profile}</p>
-      <a href="/download/apk"
+      <a href="${release.url}"
          style="display:inline-block;margin-top:20px;background:#128C7E;color:#fff;
                 padding:14px 32px;border-radius:8px;text-decoration:none;font-weight:600;">
         ⬇ Descargar APK
