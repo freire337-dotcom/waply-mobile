@@ -245,7 +245,9 @@ export default function MessageBubble({ message: m, contactName, onLongPress }: 
                   {part.text}
                 </Text>
               ) : (
-                <Text key={i}>{part.text}</Text>
+                // String directo (sin <Text> extra) evita el bug de Android que
+                // hace invisibles los emojis cuando hay anidamiento de <Text>.
+                part.text
               )
             )}
           </Text>

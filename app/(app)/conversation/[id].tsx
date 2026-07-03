@@ -91,6 +91,8 @@ export default function ConversationScreen() {
       setTasks(taskList);
       setQuickReplies(qrList);
       navigation.setOptions({ title: conv.contact_name || conv.wa_id });
+      // Scroll al último mensaje tras cargar
+      setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 200);
     } catch (err) {
       console.error('Error cargando conversación:', err);
     } finally {
@@ -512,8 +514,12 @@ export default function ConversationScreen() {
         keyExtractor={item => String(item.id)}
         renderItem={({ item, index }) => {
           const prev = messages[index - 1];
-          const d = item.created_at ? new Date(item.created_at + 'Z') : null;
-          const dPrev = prev?.created_at ? new Date(prev.created_at + 'Z') : null;
+          const parseTs = (ts: string | null | undefined) => {
+            if (!ts) return null;
+            return new Date(/[Z+]/.test(ts) ? ts : ts + 'Z');
+          };
+          const d = parseTs(item.created_at);
+          const dPrev = parseTs(prev?.created_at);
           const showSep = !dPrev || (d && d.toDateString() !== dPrev.toDateString());
           const now = new Date();
           const yest = new Date(now); yest.setDate(yest.getDate() - 1);
@@ -595,15 +601,13 @@ export default function ConversationScreen() {
               : <Text style={styles.attachIcon}>📎</Text>
             }
           </TouchableOpacity>
-          {quickReplies.length > 0 && (
-            <TouchableOpacity
-              style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
-              onPress={() => setShowQR(true)}
-              disabled={isClosed}
-            >
-              <Text style={styles.attachIcon}>⚡</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity
+            style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
+            onPress={() => setShowQR(true)}
+            disabled={isClosed}
+          >
+            <Text style={styles.attachIcon}>⚡</Text>
+          </TouchableOpacity>
           <TextInput
             style={styles.input}
             value={text}
