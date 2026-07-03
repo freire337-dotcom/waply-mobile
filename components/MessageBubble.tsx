@@ -58,7 +58,11 @@ function linkify(text: string): { text: string; isLink: boolean }[] {
 
 export default function MessageBubble({ message: m, contactName, onLongPress }: Props) {
   const isOut = m.direction === 'outbound';
-  const parsedDate = m.created_at ? new Date(m.created_at + 'Z') : null;
+  // Si el backend ya incluye 'Z' o '+HH:mm', no añadir otro 'Z' (daría Invalid Date en Hermes)
+  const rawDate = m.created_at || '';
+  const parsedDate = rawDate
+    ? new Date(/[Z+]/.test(rawDate) ? rawDate : rawDate + 'Z')
+    : null;
   const isToday = parsedDate
     ? parsedDate.toDateString() === new Date().toDateString()
     : true;
@@ -330,6 +334,24 @@ export default function MessageBubble({ message: m, contactName, onLongPress }: 
           </View>
         )}
 
+        {/* Reacciones de WhatsApp (tipo 'reaction') — mostrar el emoji grande */}
+        {m.type === 'reaction' && m.body && (
+          <Text style={styles.reactionEmoji}>{m.body}</Text>
+        )}
+
+        {/* Stickers de WhatsApp */}
+        {m.type === 'sticker' && (
+          mediaUri ? (
+            <Image
+              source={{ uri: mediaUri }}
+              style={{ width: 120, height: 120, marginTop: 2 }}
+              resizeMode="contain"
+            />
+          ) : (
+            <Text style={styles.reactionEmoji}>🏷️</Text>
+          )
+        )}
+
         {isImage && m.body && (
           <Text selectable style={[styles.body, styles.caption]}>{m.body}</Text>
         )}
@@ -425,6 +447,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
+  reactionEmoji: { fontSize: 28, lineHeight: 34, textAlign: 'center', paddingVertical: 2 },
   body: { fontSize: 15, lineHeight: 20 },
   bodyIn:  { color: '#111' },
   bodyOut: { color: '#111' },
