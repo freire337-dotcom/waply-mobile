@@ -104,7 +104,19 @@ export default function ConversationScreen() {
       setQuickReplies(qrList);
       setLabels(allLabels);
       setConvLabels(convLabelList);
-      navigation.setOptions({ title: conv.contact_name || conv.wa_id });
+      const isClosed = conv.status === 'closed';
+      navigation.setOptions({
+        headerTitle: () => (
+          <View style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }} numberOfLines={1}>
+              {conv.contact_name || conv.wa_id}
+            </Text>
+            <Text style={{ fontSize: 11, color: isClosed ? '#f87171' : '#4ade80' }}>
+              {isClosed ? 'Cerrado' : (conv.status === 'pending' ? 'Pendiente' : 'Abierto')}
+            </Text>
+          </View>
+        ),
+      });
       // Scroll al último mensaje tras cargar
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 200);
     } catch (err) {
@@ -503,15 +515,7 @@ export default function ConversationScreen() {
       {/* Barra de contexto */}
       {conversation && (
         <View style={styles.contextBar}>
-          <View style={styles.contextInfo}>
-            <Text style={styles.contextPhone}>📱 {conversation.wa_id}</Text>
-            <Text style={styles.contextStatus}>
-              Estado: <Text style={[styles.bold, isClosed ? styles.closed : styles.open]}>
-                {isClosed ? 'Cerrado' : 'Abierto'}
-              </Text>
-            </Text>
-          </View>
-          <View style={styles.contextActions}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.contextActions}>
             <TouchableOpacity
               style={[styles.stagePill, { backgroundColor: currentStage.color }]}
               onPress={() => setShowStagePicker(true)}
@@ -542,7 +546,7 @@ export default function ConversationScreen() {
                 {isClosed ? '↩ Reabrir' : '✓ Cerrar'}
               </Text>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         </View>
       )}
 
