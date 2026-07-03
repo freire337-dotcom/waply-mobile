@@ -11,6 +11,7 @@ const db       = require('../db');
 const engine   = require('./automation-engine');
 const whatsapp = require('../services/whatsapp');
 const { saveNotification } = require('../services/notifications');
+const { pushStatusToCRM }  = require('../services/crm-sync');
 
 // ── Utilidades de tiempo ──────────────────────────────────────────────────────
 function startOfDay(date) {
@@ -203,7 +204,7 @@ async function checkAutoCloseLost() {
   console.log('⏰ [CRON] Revisando chats a cerrar como perdido...');
   const rows = await db.prepare(`
     SELECT c.id AS conversation_id, c.tenant_id, c.lead_id,
-           ct.id AS contact_id, ct.name AS contact_name
+           ct.id AS contact_id, ct.wa_id, ct.name AS contact_name
     FROM conversations c
     JOIN contacts ct ON ct.id = c.contact_id
     JOIN LATERAL (
@@ -223,6 +224,15 @@ async function checkAutoCloseLost() {
         SET status = 'closed', pipeline_stage = 'perdido', followup_24h_sent = false
         WHERE id = ?
       `).run(row.conversation_id);
+
+      // Sincronizar cierre con el CRM
+      await pushStatusToCRM({
+        tenantId: row.tenant_id,
+        convId:   row.conversation_id,
+        phone:    row.wa_id,
+        leadId:   row.lead_id || null,
+        status:   'closed',
+      }).catch(e => console.warn(`  ⚠ CRM sync error conv #${row.conversation_id}:`, e.message));
 
       // Notificar en tiempo real al frontend
       const io = getIO();
