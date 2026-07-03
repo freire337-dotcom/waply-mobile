@@ -145,4 +145,7 @@ export const patchTask = (taskId: number, data: { status?: 'pending' | 'done'; t
 export const deleteTask = (taskId: number) =>
   api.delete(`/tasks/${taskId}`).then(r => r.data);
 
+export const getQuickReplies = () =>
+  api.get('/quick-replies').then(r => r.data as any[]);
+
 export default api;

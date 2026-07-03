@@ -16,6 +16,7 @@ import {
   patchConversation, getAgents, getConversations, PIPELINE_STAGES,
   getConversationTasks, createConversationTask, patchTask, deleteTask,
   ConversationTask, editMessage, deleteMessage, forwardMessage,
+  getQuickReplies,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -62,6 +63,10 @@ export default function ConversationScreen() {
   const [forwarding, setForwarding]           = useState(false);
   const [forwardSourceMsg, setForwardSourceMsg] = useState<any>(null);
 
+  // Plantillas rápidas de respuesta
+  const [quickReplies, setQuickReplies] = useState<any[]>([]);
+  const [showQR, setShowQR]             = useState(false);
+
   // Responder a un mensaje (quote/reply de WhatsApp)
   const [replyingTo, setReplyingTo] = useState<{
     wa_message_id: string; body: string | null; type: string;
@@ -75,14 +80,16 @@ export default function ConversationScreen() {
   // Cargar conversación y mensajes
   const load = useCallback(async () => {
     try {
-      const [conv, msgs, taskList] = await Promise.all([
+      const [conv, msgs, taskList, qrList] = await Promise.all([
         getConversation(convId),
         getMessages(convId),
         getConversationTasks(convId).catch(() => []),
+        getQuickReplies().catch(() => []),
       ]);
       setConversation(conv);
       setMessages(msgs.messages);
       setTasks(taskList);
+      setQuickReplies(qrList);
       navigation.setOptions({ title: conv.contact_name || conv.wa_id });
     } catch (err) {
       console.error('Error cargando conversación:', err);
@@ -503,13 +510,34 @@ export default function ConversationScreen() {
         ref={flatRef}
         data={messages}
         keyExtractor={item => String(item.id)}
-        renderItem={({ item }) => (
-          <MessageBubble
-            message={item}
-            contactName={conversation?.contact_name}
-            onLongPress={handleLongPressMessage}
-          />
-        )}
+        renderItem={({ item, index }) => {
+          const prev = messages[index - 1];
+          const d = item.created_at ? new Date(item.created_at + 'Z') : null;
+          const dPrev = prev?.created_at ? new Date(prev.created_at + 'Z') : null;
+          const showSep = !dPrev || (d && d.toDateString() !== dPrev.toDateString());
+          const now = new Date();
+          const yest = new Date(now); yest.setDate(yest.getDate() - 1);
+          const sepLabel = !d ? '' :
+            d.toDateString() === now.toDateString()  ? 'Hoy' :
+            d.toDateString() === yest.toDateString() ? 'Ayer' :
+            d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' });
+          return (
+            <>
+              {showSep && d && (
+                <View style={styles.daySepRow}>
+                  <View style={styles.daySepLine} />
+                  <Text style={styles.daySepText}>{sepLabel}</Text>
+                  <View style={styles.daySepLine} />
+                </View>
+              )}
+              <MessageBubble
+                message={item}
+                contactName={conversation?.contact_name}
+                onLongPress={handleLongPressMessage}
+              />
+            </>
+          );
+        }}
         contentContainerStyle={styles.messagesList}
         onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
         onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
@@ -567,6 +595,15 @@ export default function ConversationScreen() {
               : <Text style={styles.attachIcon}>📎</Text>
             }
           </TouchableOpacity>
+          {quickReplies.length > 0 && (
+            <TouchableOpacity
+              style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
+              onPress={() => setShowQR(true)}
+              disabled={isClosed}
+            >
+              <Text style={styles.attachIcon}>⚡</Text>
+            </TouchableOpacity>
+          )}
           <TextInput
             style={styles.input}
             value={text}
@@ -898,6 +935,34 @@ export default function ConversationScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Modal plantillas rápidas */}
+      <Modal visible={showQR} transparent animationType="slide" onRequestClose={() => setShowQR(false)}>
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowQR(false)}
+        >
+          <View style={[styles.modalBox, { maxHeight: '60%' }]}>
+            <Text style={styles.modalTitle}>⚡ Plantillas rápidas</Text>
+            <ScrollView>
+              {quickReplies.map(qr => (
+                <TouchableOpacity
+                  key={qr.id}
+                  style={styles.agentRow}
+                  onPress={() => { setText(qr.body); setShowQR(false); }}
+                >
+                  <Text style={[styles.agentName, { fontWeight: '600' }]}>{qr.name}</Text>
+                  <Text style={styles.agentEmail} numberOfLines={2}>{qr.body}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowQR(false)}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -984,6 +1049,28 @@ const styles = StyleSheet.create({
 
   messagesContainer:  { flex: 1 },
   messagesList:       { paddingVertical: 12 },
+
+  daySepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  daySepLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+  },
+  daySepText: {
+    fontSize: 11,
+    color: '#888',
+    backgroundColor: '#ddd8d0',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
   emptyMessages:      { flex: 1, alignItems: 'center', paddingTop: 60 },
   emptyText:          { color: '#888', fontSize: 15 },
 

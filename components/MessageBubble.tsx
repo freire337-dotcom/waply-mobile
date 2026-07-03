@@ -59,8 +59,11 @@ function linkify(text: string): { text: string; isLink: boolean }[] {
 export default function MessageBubble({ message: m, contactName, onLongPress }: Props) {
   const isOut = m.direction === 'outbound';
   const parsedDate = m.created_at ? new Date(m.created_at + 'Z') : null;
+  const isToday = parsedDate
+    ? parsedDate.toDateString() === new Date().toDateString()
+    : true;
   const time  = parsedDate && !isNaN(parsedDate.getTime())
-    ? format(parsedDate, 'HH:mm')
+    ? isToday ? format(parsedDate, 'HH:mm') : format(parsedDate, 'dd/MM HH:mm')
     : '';
 
   const statusIcon =

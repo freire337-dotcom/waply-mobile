@@ -3,12 +3,14 @@ import { Redirect } from 'expo-router';
 import { useAuthStore } from '../../store/auth';
 import { useSocket } from '../../hooks/useSocket';
 import { useNotifications } from '../../hooks/useNotifications';
+import { useUpdateChecker } from '../../hooks/useUpdateChecker';
 
 export default function AppLayout() {
   const agent = useAuthStore(s => s.agent);
 
   useNotifications();
   useSocket();
+  useUpdateChecker();
 
   if (!agent) return <Redirect href="/(auth)/login" />;
 

@@ -46,7 +46,7 @@ export default function SettingsScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={styles.version}>Waply · v1.0.0</Text>
+      <Text style={styles.version}>Waply · v1.2.0</Text>
     </View>
   );
 }
