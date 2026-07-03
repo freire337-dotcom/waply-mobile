@@ -157,7 +157,6 @@ router.post('/bulk-import', auth, async (req, res) => {
                 message:     lastMsg,
               });
             }
-          }
           } catch (e) {
             console.warn('bulk-import: fallo backfill CRM para existente', phone, e.message);
           }
