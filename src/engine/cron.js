@@ -194,6 +194,61 @@ async function checkNoResponse24h() {
   }
 }
 
+// ── Job 5: Auto-cierre como "perdido" ────────────────────────────────────────
+// Si enviamos la plantilla de seguimiento (followup_24h_sent=true) y el cliente
+// sigue sin contestar 10h después, cerramos el chat como cerrado/perdido.
+// El cron de seguimiento ya no lo volverá a tocar (followup_24h_sent=true).
+async function checkAutoCloseLost() {
+  const { getIO } = require('../io');
+  console.log('⏰ [CRON] Revisando chats a cerrar como perdido...');
+  const rows = await db.prepare(`
+    SELECT c.id AS conversation_id, c.tenant_id, c.lead_id,
+           ct.id AS contact_id, ct.name AS contact_name
+    FROM conversations c
+    JOIN contacts ct ON ct.id = c.contact_id
+    JOIN LATERAL (
+      SELECT direction FROM messages WHERE conversation_id = c.id ORDER BY created_at DESC LIMIT 1
+    ) lm ON true
+    WHERE c.followup_24h_sent = true
+      AND c.status != 'closed'
+      AND c.last_msg_at <= NOW() - INTERVAL '10 hours'
+      AND lm.direction = 'outbound'
+  `).all();
+  console.log(`⏰ [CRON] Cerrar como perdido: ${rows.length} conversación(es)`);
+
+  for (const row of rows) {
+    try {
+      await db.prepare(`
+        UPDATE conversations
+        SET status = 'closed', pipeline_stage = 'perdido', followup_24h_sent = false
+        WHERE id = ?
+      `).run(row.conversation_id);
+
+      // Notificar en tiempo real al frontend
+      const io = getIO();
+      if (io) {
+        io.to(`tenant:${row.tenant_id}`).emit('conversation:updated', {
+          id:             row.conversation_id,
+          status:         'closed',
+          pipeline_stage: 'perdido',
+        });
+      }
+
+      await saveNotification({
+        tenantId:       row.tenant_id,
+        agentId:        null,
+        type:           'no_response',
+        title:          '❌ Chat cerrado como perdido',
+        body:           row.contact_name || `Conversación #${row.conversation_id}`,
+        conversationId: row.conversation_id,
+      });
+      console.log(`  ✅ Conversación #${row.conversation_id} cerrada como perdido`);
+    } catch (err) {
+      console.error(`  ❌ Error cerrando conv #${row.conversation_id}:`, err.message);
+    }
+  }
+}
+
 // ── Calcular ms hasta la próxima hora objetivo ────────────────────────────────
 function msUntilHour(hour, minute = 0) {
   const now  = new Date();
@@ -223,15 +278,19 @@ function startCronJobs() {
   // porque el agente fija la hora exacta, ej. "llamar a las 11:30")
   setInterval(() => checkConversationTasks().catch(console.error), 5 * 60 * 1000);
 
-  // Job 4: cada 30 minutos (sin respuesta en 24h)
+  // Job 4: cada 30 minutos (sin respuesta en 12h)
   setInterval(() => checkNoResponse24h().catch(console.error), 30 * 60 * 1000);
+
+  // Job 5: cada 30 minutos (auto-cierre como perdido tras 10h sin respuesta post-plantilla)
+  setInterval(() => checkAutoCloseLost().catch(console.error), 30 * 60 * 1000);
 
   // Ejecutar inmediatamente al arrancar
   checkExpiredTimers().catch(console.error);
   checkConversationTasks().catch(console.error);
   checkNoResponse24h().catch(console.error);
+  checkAutoCloseLost().catch(console.error);
 
   console.log('✅ Cron jobs iniciados');
 }
 
-module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers, checkConversationTasks, checkNoResponse24h };
+module.exports = { startCronJobs, checkAppointmentReminders, checkExpiredTimers, checkConversationTasks, checkNoResponse24h, checkAutoCloseLost };

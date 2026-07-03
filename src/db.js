@@ -261,6 +261,18 @@ async function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_messages_sender     ON messages(sender_id) WHERE sender_id IS NOT NULL;
     -- Índice para el panel de notificaciones (campana): acelera la query más frecuente
     CREATE INDEX IF NOT EXISTS idx_notif_unread        ON notifications(tenant_id, read, created_at DESC);
+
+    -- Plantillas rápidas de respuesta: textos predefinidos que los agentes insertan
+    -- con un clic en el chat sin escribirlos cada vez (ej. "Muchas gracias, en breve..").
+    CREATE TABLE IF NOT EXISTS quick_replies (
+      id          SERIAL PRIMARY KEY,
+      tenant_id   INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+      name        TEXT    NOT NULL,
+      body        TEXT    NOT NULL,
+      created_by  INTEGER REFERENCES agents(id),
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_quick_replies_tenant ON quick_replies(tenant_id);
   `);
   console.log('✅ Schema PostgreSQL inicializado');
 }

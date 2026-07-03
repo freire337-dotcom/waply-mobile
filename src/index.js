@@ -22,6 +22,7 @@ const releasesRoutes      = require('./routes/releases');
 const tasksRoutes         = require('./routes/tasks');
 const aiAgentRoutes           = require('./routes/ai-agent');
 const notificationsRoutes     = require('./routes/notifications');
+const quickRepliesRoutes      = require('./routes/quick-replies');
 const metaWebhook                    = require('./webhook/meta');
 const { replayPendingWebhooks }      = require('./webhook/meta');
 const { startCronJobs }   = require('./engine/cron');
@@ -54,6 +55,7 @@ app.use('/api/triggers',      triggersRoutes);
 app.use('/api',               tasksRoutes);
 app.use('/api/ai-agent',      aiAgentRoutes);
 app.use('/api/notifications', notificationsRoutes);
+app.use('/api/quick-replies', quickRepliesRoutes);
 app.use('/',                  releasesRoutes);
 app.use('/webhook/meta',      metaWebhook);
 
