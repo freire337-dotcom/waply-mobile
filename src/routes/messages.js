@@ -47,9 +47,13 @@ router.get('/:convId/messages', auth, async (req, res) => {
       LEFT JOIN messages qm ON qm.wa_message_id = m.context_wa_message_id
       LEFT JOIN agents qa ON qa.id = qm.sender_id
       WHERE m.conversation_id = ? AND m.tenant_id = ?
-      ORDER BY m.created_at ASC
+      ORDER BY m.created_at DESC
       LIMIT ? OFFSET ?
     `).all(req.params.convId, tid, limit, offset);
+
+    // rows viene en DESC (más reciente primero); lo revertimos para que el front
+    // los reciba en orden cronológico ASC sin perder la paginación hacia atrás.
+    rows.reverse();
 
     // contacts_payload va como TEXT (JSON serializado) en la BD — el front
     // espera el array ya parseado en `contacts` (ver tarjetas de contacto/vCard).
