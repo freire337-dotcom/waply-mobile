@@ -25,6 +25,7 @@ interface Props {
     sender_name?: string;
     created_at: string;
     edited?: boolean;
+    is_internal?: boolean;     // nota interna (solo agentes) — fondo ámbar
     // Tarjeta de contacto compartida (vCard) — viene ya parseada del backend
     // cuando type === 'contacts' (ver webhook/meta.js).
     contacts?: { name?: { formatted_name?: string }; phones?: { phone?: string; wa_id?: string }[] }[] | null;
@@ -57,7 +58,8 @@ function linkify(text: string): { text: string; isLink: boolean }[] {
 }
 
 export default function MessageBubble({ message: m, contactName, onLongPress }: Props) {
-  const isOut = m.direction === 'outbound';
+  const isOut      = m.direction === 'outbound';
+  const isInternal = !!m.is_internal;
   // Si el backend ya incluye 'Z' o '+HH:mm', no añadir otro 'Z' (daría Invalid Date en Hermes)
   const rawDate = m.created_at || '';
   const parsedDate = rawDate
@@ -199,11 +201,20 @@ export default function MessageBubble({ message: m, contactName, onLongPress }: 
         onLongPress={() => onLongPress?.(m)}
         style={[
         styles.bubble,
-        isOut ? styles.bubbleOut : styles.bubbleIn,
+        isInternal ? styles.bubbleInternal : (isOut ? styles.bubbleOut : styles.bubbleIn),
         m.status === 'sending' && { opacity: 0.6 },
       ]}>
-        {!isOut && m.sender_name && (
+        {/* Badge de nota interna */}
+        {isInternal && (
+          <View style={styles.internalBadge}>
+            <Text style={styles.internalBadgeText}>🔒 Nota interna</Text>
+          </View>
+        )}
+        {!isOut && !isInternal && m.sender_name && (
           <Text style={styles.sender}>{m.sender_name}</Text>
+        )}
+        {isInternal && m.sender_name && (
+          <Text style={[styles.sender, { color: '#92400e' }]}>{m.sender_name}</Text>
         )}
 
         {/* Cita del mensaje al que se responde (reply/quote de WhatsApp) */}
@@ -413,8 +424,29 @@ const styles = StyleSheet.create({
     shadowRadius: 1,
     elevation: 1,
   },
-  bubbleIn:  { backgroundColor: '#fff', borderTopLeftRadius: 2 },
-  bubbleOut: { backgroundColor: '#DCF8C6', borderTopRightRadius: 2 },
+  bubbleIn:       { backgroundColor: '#fff', borderTopLeftRadius: 2 },
+  bubbleOut:      { backgroundColor: '#DCF8C6', borderTopRightRadius: 2 },
+  // Notas internas: fondo ámbar suave, borde izquierdo naranja
+  bubbleInternal: {
+    backgroundColor: '#fef3c7',
+    borderTopLeftRadius: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: '#f59e0b',
+  },
+  internalBadge: {
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginBottom: 4,
+    alignSelf: 'flex-start',
+  },
+  internalBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#92400e',
+    letterSpacing: 0.2,
+  },
 
   sender: {
     fontSize: 12,

@@ -61,6 +61,7 @@ export const sendMessage = (convId: number, payload: {
   type?: 'text' | 'template';
   body?: string;
   context_id?: string | null; // wa_message_id del mensaje al que se responde (reply/quote)
+  is_internal?: boolean;      // true = nota interna (solo visible para agentes)
   template_name?: string;
   template_language?: string;
   template_components?: unknown[];
@@ -148,5 +149,29 @@ export const deleteTask = (taskId: number) =>
 
 export const getQuickReplies = () =>
   api.get('/quick-replies').then(r => r.data as any[]);
+
+// ── Etiquetas (Labels) ────────────────────────────────────────────────────────
+export interface Label {
+  id: number;
+  name: string;
+  color: string;
+  usage_count?: number;
+}
+
+// Lista de etiquetas del tenant
+export const getLabels = () =>
+  api.get('/labels').then(r => r.data.labels as Label[]);
+
+// Etiquetas asignadas a una conversación
+export const getConversationLabels = (convId: number) =>
+  api.get(`/conversations/${convId}/labels`).then(r => r.data.labels as Label[]);
+
+// Asignar etiqueta a conversación
+export const addLabelToConversation = (convId: number, labelId: number) =>
+  api.post(`/conversations/${convId}/labels`, { label_id: labelId }).then(r => r.data.labels as Label[]);
+
+// Quitar etiqueta de conversación
+export const removeLabelFromConversation = (convId: number, labelId: number) =>
+  api.delete(`/conversations/${convId}/labels/${labelId}`).then(r => r.data);
 
 export default api;

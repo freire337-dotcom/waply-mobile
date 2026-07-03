@@ -17,6 +17,8 @@ import {
   getConversationTasks, createConversationTask, patchTask, deleteTask,
   ConversationTask, editMessage, deleteMessage, forwardMessage,
   getQuickReplies,
+  getLabels, getConversationLabels, addLabelToConversation, removeLabelFromConversation,
+  Label,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -67,6 +69,14 @@ export default function ConversationScreen() {
   const [quickReplies, setQuickReplies] = useState<any[]>([]);
   const [showQR, setShowQR]             = useState(false);
 
+  // Etiquetas
+  const [labels, setLabels]         = useState<Label[]>([]); // todas las etiquetas del tenant
+  const [convLabels, setConvLabels] = useState<Label[]>([]); // etiquetas asignadas a esta conv
+  const [showLabels, setShowLabels] = useState(false);
+
+  // Nota interna (solo visible para agentes — fondo ámbar)
+  const [isInternal, setIsInternal] = useState(false);
+
   // Responder a un mensaje (quote/reply de WhatsApp)
   const [replyingTo, setReplyingTo] = useState<{
     wa_message_id: string; body: string | null; type: string;
@@ -80,16 +90,20 @@ export default function ConversationScreen() {
   // Cargar conversación y mensajes
   const load = useCallback(async () => {
     try {
-      const [conv, msgs, taskList, qrList] = await Promise.all([
+      const [conv, msgs, taskList, qrList, allLabels, convLabelList] = await Promise.all([
         getConversation(convId),
         getMessages(convId),
         getConversationTasks(convId).catch(() => []),
         getQuickReplies().catch(() => []),
+        getLabels().catch(() => []),
+        getConversationLabels(convId).catch(() => []),
       ]);
       setConversation(conv);
       setMessages(msgs.messages);
       setTasks(taskList);
       setQuickReplies(qrList);
+      setLabels(allLabels);
+      setConvLabels(convLabelList);
       navigation.setOptions({ title: conv.contact_name || conv.wa_id });
       // Scroll al último mensaje tras cargar
       setTimeout(() => flatRef.current?.scrollToEnd({ animated: false }), 200);
@@ -142,6 +156,8 @@ export default function ConversationScreen() {
       direction: replyingTo.direction, sender_name: replyingTo.sender_name,
     } : null;
 
+    const internal = isInternal;
+
     const optimisticMsg = {
       id: tempId,
       direction: 'outbound',
@@ -151,16 +167,18 @@ export default function ConversationScreen() {
       sender_name: currentAgent?.name,
       created_at: new Date().toISOString(),
       quoted_message: quotedSnap,
+      is_internal: internal,
     };
 
     setText('');
     setReplyingTo(null);
+    setIsInternal(false); // reset tras envío
     setSending(true);
     setMessages(prev => [...prev, optimisticMsg]);
     setTimeout(() => flatRef.current?.scrollToEnd({ animated: true }), 50);
 
     try {
-      const msg = await sendMessage(convId, { type: 'text', body: trimmed, context_id: contextId });
+      const msg = await sendMessage(convId, { type: 'text', body: trimmed, context_id: contextId, is_internal: internal });
       setMessages(prev => {
         const withoutTemp = prev.filter(m => m.id !== tempId);
         return withoutTemp.find(m => m.id === msg.id) ? withoutTemp : [...withoutTemp, msg];
@@ -267,6 +285,22 @@ export default function ConversationScreen() {
         },
       ]
     );
+  };
+
+  // Asignar/quitar etiqueta de la conversación
+  const handleToggleLabel = async (label: Label) => {
+    const isAssigned = convLabels.some(l => l.id === label.id);
+    try {
+      if (isAssigned) {
+        await removeLabelFromConversation(convId, label.id);
+        setConvLabels(prev => prev.filter(l => l.id !== label.id));
+      } else {
+        const updated = await addLabelToConversation(convId, label.id);
+        setConvLabels(updated);
+      }
+    } catch {
+      Alert.alert('Error', 'No se pudo actualizar la etiqueta');
+    }
   };
 
   // Asignar agente
@@ -495,6 +529,11 @@ export default function ConversationScreen() {
                 🔔{pendingTasksCount > 0 ? ` ${pendingTasksCount}` : ''}
               </Text>
             </TouchableOpacity>
+            <TouchableOpacity style={styles.actionBtn} onPress={() => setShowLabels(true)}>
+              <Text style={styles.actionBtnText}>
+                🏷{convLabels.length > 0 ? ` ${convLabels.length}` : ''}
+              </Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionBtn, isClosed ? styles.actionBtnGreen : styles.actionBtnRed]}
               onPress={handleToggleStatus}
@@ -504,6 +543,22 @@ export default function ConversationScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+        </View>
+      )}
+
+      {/* Chips de etiquetas asignadas */}
+      {convLabels.length > 0 && (
+        <View style={styles.labelsRow}>
+          {convLabels.map(l => (
+            <TouchableOpacity
+              key={l.id}
+              style={[styles.labelChip, { backgroundColor: l.color + '22', borderColor: l.color }]}
+              onPress={() => setShowLabels(true)}
+            >
+              <View style={[styles.labelDot, { backgroundColor: l.color }]} />
+              <Text style={[styles.labelChipText, { color: l.color }]}>{l.name}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
       )}
 
@@ -608,12 +663,20 @@ export default function ConversationScreen() {
           >
             <Text style={styles.attachIcon}>⚡</Text>
           </TouchableOpacity>
+          {/* Toggle nota interna */}
+          <TouchableOpacity
+            style={[styles.attachBtn, isInternal && styles.internalBtn, isClosed && styles.sendBtnDisabled]}
+            onPress={() => setIsInternal(v => !v)}
+            disabled={isClosed}
+          >
+            <Ionicons name={isInternal ? 'lock-closed' : 'lock-open-outline'} size={18} color={isInternal ? '#92400e' : '#aaa'} />
+          </TouchableOpacity>
           <TextInput
-            style={styles.input}
+            style={[styles.input, isInternal && styles.inputInternal]}
             value={text}
             onChangeText={setText}
-            placeholder={isClosed ? 'Conversación cerrada' : 'Escribe un mensaje...'}
-            placeholderTextColor="#aaa"
+            placeholder={isClosed ? 'Conversación cerrada' : isInternal ? '🔒 Nota interna (solo agentes)...' : 'Escribe un mensaje...'}
+            placeholderTextColor={isInternal ? '#b45309' : '#aaa'}
             multiline
             maxLength={4096}
             editable={!isClosed}
@@ -940,6 +1003,41 @@ export default function ConversationScreen() {
         </View>
       </Modal>
 
+      {/* Modal etiquetas */}
+      <Modal visible={showLabels} transparent animationType="slide" onRequestClose={() => setShowLabels(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowLabels(false)}>
+          <View style={[styles.modalBox, { maxHeight: '60%' }]}>
+            <Text style={styles.modalTitle}>🏷 Etiquetas</Text>
+            <ScrollView>
+              {labels.length === 0 && (
+                <Text style={[styles.emptyTasksText, { padding: 20 }]}>
+                  Aún no hay etiquetas.{'\n'}Créalas desde el panel web.
+                </Text>
+              )}
+              {labels.map(label => {
+                const assigned = convLabels.some(l => l.id === label.id);
+                return (
+                  <TouchableOpacity
+                    key={label.id}
+                    style={[styles.agentRow, assigned && styles.agentRowActive]}
+                    onPress={() => handleToggleLabel(label)}
+                  >
+                    <View style={[styles.labelDot, { backgroundColor: label.color, width: 12, height: 12, borderRadius: 6 }]} />
+                    <Text style={[styles.agentName, { flex: 1 }]}>{label.name}</Text>
+                    {assigned && (
+                      <Ionicons name="checkmark-circle" size={20} color="#25D366" />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowLabels(false)}>
+              <Text style={styles.modalCloseText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Modal plantillas rápidas */}
       <Modal visible={showQR} transparent animationType="slide" onRequestClose={() => setShowQR(false)}>
         <TouchableOpacity
@@ -1106,6 +1204,47 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: { backgroundColor: '#aaa' },
   sendIcon: { color: '#fff', fontSize: 18, marginLeft: 2 },
+
+  // Chips de etiquetas
+  labelsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#fafafa',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#e0e0e0',
+  },
+  labelChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
+  },
+  labelDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  labelChipText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  // Botón nota interna activo
+  internalBtn: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 20,
+  },
+  // Input en modo nota interna
+  inputInternal: {
+    backgroundColor: '#fef3c7',
+    color: '#92400e',
+  },
 
   replyBar: {
     flexDirection: 'row',
