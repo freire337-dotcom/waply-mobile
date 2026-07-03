@@ -55,6 +55,54 @@ router.post('/', auth, async (req, res) => {
   }
 });
 
+// POST /api/conversations/compare — compara una lista de teléfonos contra los contactos
+// existentes del tenant y devuelve cuáles ya están en Waply y cuáles son nuevos.
+// Útil para saber qué leads de un CSV externo aún no han sido contactados.
+router.post('/compare', auth, async (req, res) => {
+  const { contacts } = req.body;
+  if (!Array.isArray(contacts) || contacts.length === 0) {
+    return res.status(400).json({ error: 'contacts (array) requerido' });
+  }
+
+  const tid = req.agent.tenant_id;
+  const existing = [];
+  const missing  = [];
+
+  for (const raw of contacts) {
+    const name  = (raw?.name  || '').trim();
+    const phone = (raw?.phone || '').trim();
+    if (!phone) continue;
+
+    const waId = normalizePhone(phone);
+    if (!waId) { missing.push({ name, phone, error: 'Teléfono no válido' }); continue; }
+
+    const row = await db.prepare(`
+      SELECT ct.id AS contact_id, ct.name AS contact_name,
+             cv.id AS conv_id, cv.status, cv.last_msg_at, cv.last_message
+      FROM contacts ct
+      LEFT JOIN conversations cv ON cv.contact_id = ct.id AND cv.tenant_id = ?
+      WHERE ct.tenant_id = ? AND ct.wa_id = ?
+    `).get(tid, tid, waId);
+
+    if (row) {
+      existing.push({
+        name:         name || row.contact_name,
+        phone,
+        wa_id:        waId,
+        contact_id:   row.contact_id,
+        conv_id:      row.conv_id,
+        status:       row.status,
+        last_msg_at:  row.last_msg_at,
+        last_message: row.last_message,
+      });
+    } else {
+      missing.push({ name, phone, wa_id: waId });
+    }
+  }
+
+  res.json({ existing, missing, total: contacts.length });
+});
+
 // POST /api/conversations/bulk-import — alta masiva de leads que no llegaron solos
 // (p.ej. exportados de Meta Ads Manager: rellenaron el formulario del anuncio pero
 // nunca pulsaron "Enviar" en WhatsApp, así que no hay mensaje ni webhook). Para cada
