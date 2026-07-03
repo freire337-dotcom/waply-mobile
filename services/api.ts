@@ -31,6 +31,7 @@ export const getConversations = (params?: {
   status?: ConvStatus;
   assigned_to?: 'me' | 'unassigned';
   page?: number;
+  limit?: number;
 }) => api.get('/conversations', { params }).then(r => r.data);
 
 export const getConversation = (id: number) =>

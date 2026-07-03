@@ -42,7 +42,7 @@ export default function ContactsScreen() {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
     try {
-      const data = await getConversations({ status: 'all' as any });
+      const data = await getConversations({ status: 'all' as any, limit: 1000 });
       const seen = new Set<number>();
       const list: Contact[] = (data.conversations || [])
         .filter((c: any) => { if (seen.has(c.contact_id)) return false; seen.add(c.contact_id); return true; })
