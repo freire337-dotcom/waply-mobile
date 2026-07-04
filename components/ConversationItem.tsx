@@ -3,6 +3,12 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
+interface Label {
+  id: number;
+  name: string;
+  color: string;
+}
+
 interface Props {
   conversation: {
     id: number;
@@ -13,6 +19,7 @@ interface Props {
     unread_count: number;
     status: string;
     agent_name?: string;
+    labels?: Label[];
   };
   onPress: () => void;
 }
@@ -29,6 +36,8 @@ export default function ConversationItem({ conversation: c, onPress }: Props) {
   const timeAgo = parsedDate && !isNaN(parsedDate.getTime())
     ? formatDistanceToNow(parsedDate, { addSuffix: false, locale: es })
     : '';
+
+  const labels: Label[] = Array.isArray(c.labels) ? c.labels : [];
 
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.7}>
@@ -57,6 +66,19 @@ export default function ConversationItem({ conversation: c, onPress }: Props) {
         </View>
         {c.agent_name && (
           <Text style={styles.agent}>👤 {c.agent_name}</Text>
+        )}
+        {/* Etiquetas */}
+        {labels.length > 0 && (
+          <View style={styles.labelsRow}>
+            {labels.slice(0, 3).map(label => (
+              <View key={label.id} style={[styles.labelPill, { backgroundColor: label.color + '22', borderColor: label.color }]}>
+                <Text style={[styles.labelText, { color: label.color }]}>{label.name}</Text>
+              </View>
+            ))}
+            {labels.length > 3 && (
+              <Text style={styles.labelMore}>+{labels.length - 3}</Text>
+            )}
+          </View>
         )}
       </View>
     </TouchableOpacity>
@@ -135,5 +157,26 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#128C7E',
     marginTop: 2,
+  },
+  labelsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 4,
+  },
+  labelPill: {
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  labelText: {
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  labelMore: {
+    fontSize: 10,
+    color: '#888',
+    alignSelf: 'center',
   },
 });

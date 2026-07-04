@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, FlatList, Text, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, StatusBar, Modal, TextInput, Alert,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getConversations, createConversation, ConvStatus } from '../../../services/api';
+import { getConversations, createConversation, getLabels, ConvStatus } from '../../../services/api';
 import { useSocket } from '../../../hooks/useSocket';
 import { useUnreadStore } from '../../../store/unread';
 import ConversationItem from '../../../components/ConversationItem';
@@ -23,6 +24,10 @@ export default function ConversationsScreen() {
   const [loading, setLoading]             = useState(true);
   const [refreshing, setRefreshing]       = useState(false);
   const setUnreadTotal                    = useUnreadStore(s => s.setTotal);
+
+  // Etiquetas para filtrar
+  const [allLabels, setAllLabels]         = useState<any[]>([]);
+  const [labelFilter, setLabelFilter]     = useState<number | null>(null);
 
   // Buscador de contactos — filtra la lista cargada por nombre o teléfono
   const [search, setSearch] = useState('');
@@ -50,6 +55,11 @@ export default function ConversationsScreen() {
     }
   };
 
+  // Cargar etiquetas una vez al montar
+  useEffect(() => {
+    getLabels().then(setAllLabels).catch(() => {});
+  }, []);
+
   const fetchConversations = useCallback(async (showRefresh = false) => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
@@ -62,6 +72,7 @@ export default function ConversationsScreen() {
       } else {
         params.status = filter;
       }
+      if (labelFilter) params.label_id = labelFilter;
       const data = await getConversations(params);
       setConversations(data.conversations);
     } catch (err) {
@@ -70,7 +81,7 @@ export default function ConversationsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [filter]);
+  }, [filter, labelFilter]);
 
   useEffect(() => { fetchConversations(); }, [fetchConversations]);
 
@@ -127,7 +138,7 @@ export default function ConversationsScreen() {
         )}
       </View>
 
-      {/* Filtros */}
+      {/* Filtros de estado */}
       <View style={styles.filters}>
         {FILTERS.map(f => (
           <TouchableOpacity
@@ -141,6 +152,43 @@ export default function ConversationsScreen() {
           </TouchableOpacity>
         ))}
       </View>
+
+      {/* Filtros por etiqueta */}
+      {allLabels.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.labelFiltersScroll}
+          contentContainerStyle={styles.labelFiltersContent}
+        >
+          <TouchableOpacity
+            style={[styles.labelFilterPill, labelFilter === null && styles.labelFilterPillActive]}
+            onPress={() => setLabelFilter(null)}
+          >
+            <Text style={[styles.labelFilterText, labelFilter === null && styles.labelFilterTextActive]}>
+              Todas
+            </Text>
+          </TouchableOpacity>
+          {allLabels.map(label => (
+            <TouchableOpacity
+              key={label.id}
+              style={[
+                styles.labelFilterPill,
+                { borderColor: label.color },
+                labelFilter === label.id && { backgroundColor: label.color },
+              ]}
+              onPress={() => setLabelFilter(labelFilter === label.id ? null : label.id)}
+            >
+              <Text style={[
+                styles.labelFilterText,
+                { color: labelFilter === label.id ? '#fff' : label.color },
+              ]}>
+                🏷️ {label.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
 
       {/* Badge total no leídos */}
       {totalUnread > 0 && (
@@ -276,6 +324,36 @@ const styles = StyleSheet.create({
   filterTextActive: {
     color: '#fff',
     fontWeight: '700',
+  },
+
+  labelFiltersScroll: {
+    backgroundColor: '#f0f0f0',
+    maxHeight: 40,
+  },
+  labelFiltersContent: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  labelFilterPill: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    backgroundColor: '#fff',
+  },
+  labelFilterPillActive: {
+    backgroundColor: '#128C7E',
+    borderColor: '#128C7E',
+  },
+  labelFilterText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#555',
+  },
+  labelFilterTextActive: {
+    color: '#fff',
   },
 
   unreadBanner: {

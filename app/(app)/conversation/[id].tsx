@@ -77,6 +77,9 @@ export default function ConversationScreen() {
   // Nota interna (solo visible para agentes — fondo ámbar)
   const [isInternal, setIsInternal] = useState(false);
 
+  // Modal info contacto (teléfono) al pulsar el nombre en el header
+  const [showContactInfo, setShowContactInfo] = useState(false);
+
   // Responder a un mensaje (quote/reply de WhatsApp)
   const [replyingTo, setReplyingTo] = useState<{
     wa_message_id: string; body: string | null; type: string;
@@ -107,14 +110,18 @@ export default function ConversationScreen() {
       const isClosed = conv.status === 'closed';
       navigation.setOptions({
         headerTitle: () => (
-          <View style={{ flexDirection: 'column', alignItems: 'flex-start' }}>
+          <TouchableOpacity
+            onPress={() => setShowContactInfo(true)}
+            style={{ flexDirection: 'column', alignItems: 'flex-start' }}
+            activeOpacity={0.7}
+          >
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }} numberOfLines={1}>
               {conv.contact_name || conv.wa_id}
             </Text>
             <Text style={{ fontSize: 11, color: isClosed ? '#f87171' : '#4ade80' }}>
               {isClosed ? 'Cerrado' : (conv.status === 'pending' ? 'Pendiente' : 'Abierto')}
             </Text>
-          </View>
+          </TouchableOpacity>
         ),
       });
       // Scroll al último mensaje tras cargar
@@ -1069,6 +1076,54 @@ export default function ConversationScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* Modal info contacto — se abre al pulsar el nombre en el header */}
+      <Modal
+        visible={showContactInfo}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setShowContactInfo(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowContactInfo(false)}
+        >
+          <View style={styles.modalBox}>
+            {/* Avatar grande */}
+            <View style={styles.contactInfoAvatar}>
+              <Text style={styles.contactInfoAvatarText}>
+                {((conversation?.contact_name || conversation?.wa_id || '?')
+                  .split(' ').slice(0, 2).map((w: string) => w[0]).join('').toUpperCase())}
+              </Text>
+            </View>
+            <Text style={styles.contactInfoName}>
+              {conversation?.contact_name || conversation?.wa_id}
+            </Text>
+            {/* Teléfono */}
+            {(conversation?.phone || conversation?.wa_id) && (
+              <View style={styles.contactInfoRow}>
+                <Ionicons name="call-outline" size={18} color="#128C7E" />
+                <Text style={styles.contactInfoPhone}>
+                  {conversation?.phone || '+' + conversation?.wa_id}
+                </Text>
+              </View>
+            )}
+            {/* wa_id siempre (número de WhatsApp) */}
+            {conversation?.wa_id && (
+              <View style={styles.contactInfoRow}>
+                <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
+                <Text style={styles.contactInfoPhone}>
+                  +{conversation?.wa_id}
+                </Text>
+              </View>
+            )}
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowContactInfo(false)}>
+              <Text style={styles.modalCloseText}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -1383,4 +1438,43 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   presetChipText: { color: '#128C7E', fontSize: 13, fontWeight: '600' },
+
+  contactInfoAvatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#128C7E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginTop: 20,
+    marginBottom: 12,
+  },
+  contactInfoAvatarText: {
+    color: '#fff',
+    fontSize: 26,
+    fontWeight: '700',
+  },
+  contactInfoName: {
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    color: '#111',
+    paddingHorizontal: 20,
+    marginBottom: 16,
+  },
+  contactInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#f0f0f0',
+  },
+  contactInfoPhone: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
 });
