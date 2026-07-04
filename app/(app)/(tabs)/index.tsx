@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, FlatList, Text, StyleSheet, TouchableOpacity,
   ActivityIndicator, RefreshControl, StatusBar, Modal, TextInput, Alert,
-  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +27,7 @@ export default function ConversationsScreen() {
   // Etiquetas para filtrar
   const [allLabels, setAllLabels]         = useState<any[]>([]);
   const [labelFilter, setLabelFilter]     = useState<number | null>(null);
+  const [showLabelPicker, setShowLabelPicker] = useState(false);
 
   // Buscador de contactos — filtra la lista cargada por nombre o teléfono
   const [search, setSearch] = useState('');
@@ -153,42 +153,50 @@ export default function ConversationsScreen() {
         ))}
       </View>
 
-      {/* Filtros por etiqueta */}
+      {/* Filtro por etiqueta — botón compacto */}
       {allLabels.length > 0 && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.labelFiltersScroll}
-          contentContainerStyle={styles.labelFiltersContent}
+        <TouchableOpacity
+          style={[styles.labelFilterBtn, labelFilter !== null && styles.labelFilterBtnActive]}
+          onPress={() => setShowLabelPicker(true)}
         >
-          <TouchableOpacity
-            style={[styles.labelFilterPill, labelFilter === null && styles.labelFilterPillActive]}
-            onPress={() => setLabelFilter(null)}
-          >
-            <Text style={[styles.labelFilterText, labelFilter === null && styles.labelFilterTextActive]}>
-              Todas
-            </Text>
-          </TouchableOpacity>
-          {allLabels.map(label => (
+          <Text style={[styles.labelFilterBtnText, labelFilter !== null && styles.labelFilterBtnTextActive]}>
+            🏷 {labelFilter ? (allLabels.find(l => l.id === labelFilter)?.name ?? 'Etiqueta') : 'Todas las etiquetas'}
+          </Text>
+          <Text style={{ color: labelFilter !== null ? '#075E54' : '#aaa', fontSize: 11 }}>▼</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Modal picker de etiquetas */}
+      <Modal visible={showLabelPicker} transparent animationType="slide" onRequestClose={() => setShowLabelPicker(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.modalTitle}>Filtrar por etiqueta</Text>
             <TouchableOpacity
-              key={label.id}
-              style={[
-                styles.labelFilterPill,
-                { borderColor: label.color },
-                labelFilter === label.id && { backgroundColor: label.color },
-              ]}
-              onPress={() => setLabelFilter(labelFilter === label.id ? null : label.id)}
+              style={[styles.labelPickerItem, labelFilter === null && styles.labelPickerItemActive]}
+              onPress={() => { setLabelFilter(null); setShowLabelPicker(false); }}
             >
-              <Text style={[
-                styles.labelFilterText,
-                { color: labelFilter === label.id ? '#fff' : label.color },
-              ]}>
-                🏷️ {label.name}
+              <Text style={[styles.labelPickerText, labelFilter === null && { color: '#128C7E', fontWeight: '700' }]}>
+                Todas las conversaciones
               </Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
-      )}
+            {allLabels.map(label => (
+              <TouchableOpacity
+                key={label.id}
+                style={[styles.labelPickerItem, labelFilter === label.id && styles.labelPickerItemActive]}
+                onPress={() => { setLabelFilter(label.id); setShowLabelPicker(false); }}
+              >
+                <View style={[styles.labelPickerDot, { backgroundColor: label.color }]} />
+                <Text style={[styles.labelPickerText, labelFilter === label.id && { color: label.color, fontWeight: '700' }]}>
+                  {label.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowLabelPicker(false)}>
+              <Text style={styles.modalCloseText}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* Badge total no leídos */}
       {totalUnread > 0 && (
@@ -326,34 +334,51 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  labelFiltersScroll: {
+  labelFilterBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     backgroundColor: '#f0f0f0',
-    maxHeight: 40,
-  },
-  labelFiltersContent: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#ddd',
     gap: 6,
   },
-  labelFilterPill: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    backgroundColor: '#fff',
+  labelFilterBtnActive: {
+    backgroundColor: '#e8f5e9',
   },
-  labelFilterPillActive: {
-    backgroundColor: '#128C7E',
-    borderColor: '#128C7E',
+  labelFilterBtnText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
+    flex: 1,
   },
-  labelFilterText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#555',
+  labelFilterBtnTextActive: {
+    color: '#075E54',
+    fontWeight: '700',
   },
-  labelFilterTextActive: {
-    color: '#fff',
+  labelPickerItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#f0f0f0',
+    gap: 10,
+  },
+  labelPickerItemActive: {
+    backgroundColor: '#f0faf8',
+  },
+  labelPickerDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  labelPickerText: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: '400',
   },
 
   unreadBanner: {
