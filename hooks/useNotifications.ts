@@ -49,7 +49,7 @@ async function registerForPushNotifications() {
     // o tras desinstalar. Debe coincidir con el channelId que envía el backend
     // (services/whatsapp.js) en cada push.
     await Notifications.setNotificationChannelAsync('waply-alerts', {
-      name: 'Waply',
+      name: 'Waplyy',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#25D366',

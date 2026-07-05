@@ -16,9 +16,9 @@
       "bundleIdentifier": "com.waplyy.crm",
       "buildNumber": "1",
       "infoPlist": {
-        "NSPhotoLibraryUsageDescription": "Waply necesita acceso a tus fotos para enviarlas en el chat.",
-        "NSCameraUsageDescription": "Waply necesita acceso a la cámara para enviar fotos en el chat.",
-        "NSMicrophoneUsageDescription": "Waply necesita acceso al micrófono para grabar notas de voz.",
+        "NSPhotoLibraryUsageDescription": "Waplyy necesita acceso a tus fotos para enviarlas en el chat.",
+        "NSCameraUsageDescription": "Waplyy necesita acceso a la cámara para enviar fotos en el chat.",
+        "NSMicrophoneUsageDescription": "Waplyy necesita acceso al micrófono para grabar notas de voz.",
         "UIBackgroundModes": ["remote-notification", "fetch"]
       }
     },
@@ -42,14 +42,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Waply necesita acceso a tus fotos para enviarlas en el chat.",
-          "cameraPermission": "Waply necesita acceso a la cámara para enviar fotos en el chat."
+          "photosPermission": "Waplyy necesita acceso a tus fotos para enviarlas en el chat.",
+          "cameraPermission": "Waplyy necesita acceso a la cámara para enviar fotos en el chat."
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "Waply necesita acceso al micrófono para grabar notas de voz."
+          "microphonePermission": "Waplyy necesita acceso al micrófono para grabar notas de voz."
         }
       ]
     ],

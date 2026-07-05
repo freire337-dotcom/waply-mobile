@@ -43,7 +43,7 @@ export default function LoginScreen() {
 
       <View style={styles.header}>
         <Text style={styles.logo}>💬</Text>
-        <Text style={styles.title}>Waply</Text>
+        <Text style={styles.title}>Waplyy</Text>
         <Text style={styles.subtitle}>CRM WhatsApp para tu equipo</Text>
       </View>
 
