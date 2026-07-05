@@ -19,6 +19,7 @@ import {
   getQuickReplies,
   getLabels, getConversationLabels, addLabelToConversation, removeLabelFromConversation,
   Label,
+  createAppointment, getAvailabilitySlots,
 } from '../../../services/api';
 import { useConversationSocket } from '../../../hooks/useSocket';
 import { useAuthStore } from '../../../store/auth';
@@ -76,6 +77,16 @@ export default function ConversationScreen() {
 
   // Nota interna (solo visible para agentes — fondo ámbar)
   const [isInternal, setIsInternal] = useState(false);
+
+  // Agendar cita desde el chat (pre-rellena el contacto)
+  const [showApptModal, setShowApptModal]   = useState(false);
+  const [apptTitle, setApptTitle]           = useState('');
+  const [apptDate, setApptDate]             = useState('');
+  const [apptTime, setApptTime]             = useState('09:00');
+  const [apptDuration, setApptDuration]     = useState(30);
+  const [apptNotes, setApptNotes]           = useState('');
+  const [apptSlots, setApptSlots]           = useState<{ time: string; free: boolean }[]>([]);
+  const [savingAppt, setSavingAppt]         = useState(false);
 
   // Modal info contacto (teléfono) al pulsar el nombre en el header
   const [showContactInfo, setShowContactInfo] = useState(false);
@@ -544,6 +555,22 @@ export default function ConversationScreen() {
               <Text style={styles.actionBtnText}>
                 🏷{convLabels.length > 0 ? ` ${convLabels.length}` : ''}
               </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.actionBtn}
+              onPress={() => {
+                const today = new Date().toISOString().slice(0, 10);
+                setApptDate(today);
+                setApptTitle('');
+                setApptTime('09:00');
+                setApptDuration(30);
+                setApptNotes('');
+                setApptSlots([]);
+                getAvailabilitySlots(today).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                setShowApptModal(true);
+              }}
+            >
+              <Text style={styles.actionBtnText}>📅</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.actionBtn, isClosed ? styles.actionBtnGreen : styles.actionBtnRed]}
@@ -1075,6 +1102,145 @@ export default function ConversationScreen() {
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Modal agendar cita rápida desde el chat */}
+      <Modal visible={showApptModal} transparent animationType="slide" onRequestClose={() => setShowApptModal(false)}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowApptModal(false)}>
+            <View style={[styles.modalBox, { maxHeight: '85%' }]}>
+              <Text style={styles.modalTitle}>📅 Nueva cita</Text>
+              {conversation?.contact_name ? (
+                <Text style={{ fontSize: 13, color: '#128C7E', marginBottom: 8, fontWeight: '600' }}>
+                  👤 {conversation.contact_name}
+                </Text>
+              ) : null}
+
+              <Text style={[styles.modalTitle, { fontSize: 12, color: '#6b7280', fontWeight: '600', marginBottom: 4 }]}>TÍTULO *</Text>
+              <TextInput
+                style={[styles.modalInput ?? {
+                  borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
+                  padding: 10, fontSize: 15, marginBottom: 10, color: '#111',
+                }]}
+                value={apptTitle}
+                onChangeText={setApptTitle}
+                placeholder="Ej: Llamada de seguimiento"
+                placeholderTextColor="#aaa"
+              />
+
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>FECHA</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 14, color: '#111' }}
+                    value={apptDate}
+                    onChangeText={d => {
+                      setApptDate(d);
+                      if (d.length === 10) getAvailabilitySlots(d).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                    }}
+                    placeholder="YYYY-MM-DD"
+                    placeholderTextColor="#aaa"
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>HORA</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 14, color: '#111' }}
+                    value={apptTime}
+                    onChangeText={setApptTime}
+                    placeholder="HH:MM"
+                    placeholderTextColor="#aaa"
+                    keyboardType="numeric"
+                    maxLength={5}
+                  />
+                </View>
+              </View>
+
+              {/* Slots libres */}
+              {apptSlots.filter(s => s.free).length > 0 && (
+                <>
+                  <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>HORAS LIBRES</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }}>
+                    {apptSlots.map(s => (
+                      <TouchableOpacity
+                        key={s.time}
+                        onPress={() => s.free && setApptTime(s.time)}
+                        style={{
+                          paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, marginRight: 6, borderWidth: 1,
+                          backgroundColor: s.time === apptTime ? '#075E54' : (s.free ? '#fff' : '#f3f4f6'),
+                          borderColor: s.time === apptTime ? '#075E54' : (s.free ? '#128C7E' : '#e5e7eb'),
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: s.time === apptTime ? '#fff' : '#374151' }}>{s.time}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </>
+              )}
+
+              {/* Duración */}
+              <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>DURACIÓN</Text>
+              <View style={{ flexDirection: 'row', gap: 6, marginBottom: 10 }}>
+                {[15, 30, 45, 60].map(d => (
+                  <TouchableOpacity
+                    key={d}
+                    onPress={() => setApptDuration(d)}
+                    style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1.5,
+                      borderColor: apptDuration === d ? '#075E54' : '#d1d5db',
+                      backgroundColor: apptDuration === d ? '#075E54' : '#fff' }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: apptDuration === d ? '#fff' : '#374151' }}>{d}m</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>NOTAS</Text>
+              <TextInput
+                style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 14, color: '#111', height: 60, textAlignVertical: 'top', marginBottom: 14 }}
+                value={apptNotes}
+                onChangeText={setApptNotes}
+                placeholder="Observaciones..."
+                placeholderTextColor="#aaa"
+                multiline
+              />
+
+              <TouchableOpacity
+                style={[styles.modalClose, { backgroundColor: '#075E54', marginBottom: 8 }]}
+                onPress={async () => {
+                  if (!apptTitle.trim()) { Alert.alert('Falta el título'); return; }
+                  if (!/^\d{4}-\d{2}-\d{2}$/.test(apptDate)) { Alert.alert('Fecha inválida'); return; }
+                  setSavingAppt(true);
+                  try {
+                    await createAppointment({
+                      title: apptTitle.trim(),
+                      contact_id: conversation?.contact_id ?? null,
+                      conversation_id: convId,
+                      scheduled_at: `${apptDate}T${apptTime}:00.000Z`,
+                      duration_minutes: apptDuration,
+                      notes: apptNotes || null,
+                    });
+                    setShowApptModal(false);
+                    Alert.alert('✅ Cita guardada', `${apptTitle} — ${apptDate} ${apptTime}`);
+                  } catch (err: any) {
+                    Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo guardar');
+                  } finally {
+                    setSavingAppt(false);
+                  }
+                }}
+                disabled={savingAppt}
+              >
+                {savingAppt
+                  ? <ActivityIndicator color="#fff" />
+                  : <Text style={[styles.modalCloseText, { color: '#fff' }]}>Guardar cita</Text>}
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalClose} onPress={() => setShowApptModal(false)}>
+                <Text style={styles.modalCloseText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal info contacto — se abre al pulsar el nombre en el header */}
