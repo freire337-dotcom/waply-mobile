@@ -174,4 +174,64 @@ export const addLabelToConversation = (convId: number, labelId: number) =>
 export const removeLabelFromConversation = (convId: number, labelId: number) =>
   api.delete(`/conversations/${convId}/labels/${labelId}`).then(r => r.data);
 
+// ── Agenda de citas ───────────────────────────────────────────────────────────
+export type AppointmentStatus = 'scheduled' | 'confirmed' | 'cancelled' | 'completed';
+
+export interface Appointment {
+  id: number;
+  tenant_id: number;
+  title: string;
+  contact_id: number | null;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  conversation_id: number | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  agent_id: number | null;
+  agent_name?: string | null;
+  notes: string | null;
+  status: AppointmentStatus;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export const getAppointments = (params?: { from?: string; to?: string; status?: string; agent_id?: number }) =>
+  api.get('/appointments', { params }).then(r => r.data as Appointment[]);
+
+export const getAppointment = (id: number) =>
+  api.get(`/appointments/${id}`).then(r => r.data as Appointment);
+
+export const createAppointment = (data: {
+  title: string;
+  contact_id?: number | null;
+  conversation_id?: number | null;
+  scheduled_at: string;
+  duration_minutes?: number;
+  agent_id?: number | null;
+  notes?: string | null;
+  status?: AppointmentStatus;
+}) => api.post('/appointments', data).then(r => r.data as Appointment);
+
+export const updateAppointment = (id: number, data: Partial<{
+  title: string;
+  contact_id: number | null;
+  scheduled_at: string;
+  duration_minutes: number;
+  agent_id: number | null;
+  notes: string | null;
+  status: AppointmentStatus;
+}>) => api.patch(`/appointments/${id}`, data).then(r => r.data as Appointment);
+
+export const deleteAppointment = (id: number) =>
+  api.delete(`/appointments/${id}`).then(r => r.data);
+
+export const getAvailabilitySlots = (date: string) =>
+  api.get('/appointments/availability', { params: { date } }).then(r => r.data as {
+    available: boolean;
+    date: string;
+    slot_duration: number;
+    slots: { time: string; free: boolean }[];
+    reason?: string;
+  });
+
 export default api;
