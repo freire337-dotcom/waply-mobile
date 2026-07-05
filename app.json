@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Waply",
+    "name": "Waplyy",
     "slug": "whasat",
     "version": "1.2.0",
     "orientation": "portrait",
@@ -13,7 +13,14 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.tuempresa.whasat"
+      "bundleIdentifier": "com.waplyy.crm",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Waply necesita acceso a tus fotos para enviarlas en el chat.",
+        "NSCameraUsageDescription": "Waply necesita acceso a la cámara para enviar fotos en el chat.",
+        "NSMicrophoneUsageDescription": "Waply necesita acceso al micrófono para grabar notas de voz.",
+        "UIBackgroundModes": ["remote-notification", "fetch"]
+      }
     },
     "android": {
       "adaptiveIcon": {
