@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   View, FlatList, Text, StyleSheet, TouchableOpacity,
-  ActivityIndicator, RefreshControl, StatusBar, Modal, TextInput, Alert,
+  ActivityIndicator, RefreshControl, StatusBar, Modal, TextInput, Alert, ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { getConversations, createConversation, getLabels, ConvStatus } from '../../../services/api';
+import { getConversations, createConversation, getLabels, getTemplates, sendMessage, ConvStatus } from '../../../services/api';
 import { useSocket } from '../../../hooks/useSocket';
 import { useUnreadStore } from '../../../store/unread';
 import ConversationItem from '../../../components/ConversationItem';
@@ -32,27 +32,81 @@ export default function ConversationsScreen() {
   // Buscador de contactos — filtra la lista cargada por nombre o teléfono
   const [search, setSearch] = useState('');
 
-  // Alta manual de contacto
+  // Alta manual de contacto — paso 1: datos, paso 2: plantilla
   const [showNewContact, setShowNewContact] = useState(false);
-  const [newName, setNewName]             = useState('');
-  const [newPhone, setNewPhone]           = useState('');
+  const [newName, setNewName]               = useState('');
+  const [newPhone, setNewPhone]             = useState('');
   const [creatingContact, setCreatingContact] = useState(false);
+  // paso 2
+  const [contactStep, setContactStep]       = useState<1 | 2>(1);
+  const [newConvId, setNewConvId]           = useState<number | null>(null);
+  const [templates, setTemplates]           = useState<any[]>([]);
+  const [loadingTpls, setLoadingTpls]       = useState(false);
+  const [selectedTpl, setSelectedTpl]       = useState<any | null>(null);
+  const [tplParams, setTplParams]           = useState<string[]>([]);
+  const [sendingTpl, setSendingTpl]         = useState(false);
 
+  const resetContactModal = () => {
+    setShowNewContact(false);
+    setNewName(''); setNewPhone('');
+    setContactStep(1); setNewConvId(null);
+    setTemplates([]); setSelectedTpl(null); setTplParams([]);
+  };
+
+  // Paso 1: crear contacto y pasar al paso 2 (elegir plantilla)
   const handleCreateContact = async () => {
     const phone = newPhone.trim();
     if (!phone || creatingContact) return;
     setCreatingContact(true);
     try {
       const conv = await createConversation({ name: newName.trim() || undefined, phone });
-      setShowNewContact(false);
-      setNewName('');
-      setNewPhone('');
-      router.push(`/(app)/conversation/${conv.id}`);
+      setNewConvId(conv.id);
+      setContactStep(2);
+      // Cargar plantillas aprobadas
+      setLoadingTpls(true);
+      try {
+        const tpls = await getTemplates();
+        setTemplates((tpls || []).filter((t: any) => t.status === 'APPROVED'));
+      } catch { setTemplates([]); }
+      finally { setLoadingTpls(false); }
     } catch (err: any) {
       Alert.alert('Error', err?.response?.data?.error || 'No se pudo crear el contacto');
     } finally {
       setCreatingContact(false);
     }
+  };
+
+  // Al seleccionar una plantilla, preparar array de params vacíos
+  const handleSelectTpl = (tpl: any) => {
+    setSelectedTpl(tpl);
+    setTplParams(Array(tpl.param_count || 0).fill(''));
+  };
+
+  // Paso 2: enviar plantilla y abrir chat
+  const handleSendTemplate = async () => {
+    if (!selectedTpl || !newConvId || sendingTpl) return;
+    setSendingTpl(true);
+    try {
+      const components = selectedTpl.param_count > 0
+        ? [{ type: 'body', parameters: tplParams.map((v: string) => ({ type: 'text', text: v || ' ' })) }]
+        : [];
+      await sendMessage(newConvId, {
+        type: 'template',
+        template_name: selectedTpl.name,
+        template_language: selectedTpl.language,
+        template_components: components,
+      });
+    } catch { /* si falla el envío igual abrimos el chat */ }
+    finally { setSendingTpl(false); }
+    resetContactModal();
+    router.push(`/(app)/conversation/${newConvId}`);
+  };
+
+  // Paso 2: omitir plantilla, solo abrir chat
+  const handleSkipTemplate = () => {
+    const id = newConvId;
+    resetContactModal();
+    if (id) router.push(`/(app)/conversation/${id}`);
   };
 
   // Cargar etiquetas una vez al montar
@@ -245,42 +299,134 @@ export default function ConversationsScreen() {
         <Ionicons name="person-add" size={22} color="#fff" />
       </TouchableOpacity>
 
-      <Modal visible={showNewContact} transparent animationType="slide" onRequestClose={() => setShowNewContact(false)}>
+      <Modal visible={showNewContact} transparent animationType="slide" onRequestClose={resetContactModal}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={styles.modalTitle}>Nuevo contacto</Text>
-            <View style={{ paddingHorizontal: 20, paddingVertical: 14, gap: 10 }}>
-              <Text style={styles.inputLabel}>Nombre (opcional)</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={newName}
-                onChangeText={setNewName}
-                placeholder="Ej: Sara Aguilera"
-                placeholderTextColor="#aaa"
-              />
-              <Text style={styles.inputLabel}>Teléfono</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={newPhone}
-                onChangeText={setNewPhone}
-                placeholder="Ej: +34 640 330 820"
-                placeholderTextColor="#aaa"
-                keyboardType="phone-pad"
-              />
-              <TouchableOpacity
-                style={[styles.createBtn, (!newPhone.trim() || creatingContact) && { opacity: 0.5 }]}
-                onPress={handleCreateContact}
-                disabled={!newPhone.trim() || creatingContact}
-              >
-                {creatingContact
-                  ? <ActivityIndicator size="small" color="#fff" />
-                  : <Text style={styles.createBtnText}>Crear contacto</Text>
-                }
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setShowNewContact(false)}>
-              <Text style={styles.modalCloseText}>Cancelar</Text>
-            </TouchableOpacity>
+          <View style={[styles.modalBox, { maxHeight: '90%' }]}>
+            {/* ── Paso 1: nombre + teléfono ── */}
+            {contactStep === 1 && (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 4 }}>
+                  <Text style={styles.modalTitle}>Nuevo contacto</Text>
+                  <TouchableOpacity onPress={resetContactModal} style={{ padding: 6 }}>
+                    <Text style={{ fontSize: 20, color: '#6b7280', fontWeight: '700' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <View style={{ paddingHorizontal: 20, paddingVertical: 14, gap: 10 }}>
+                  <Text style={styles.inputLabel}>Nombre (opcional)</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newName}
+                    onChangeText={setNewName}
+                    placeholder="Ej: Sara Aguilera"
+                    placeholderTextColor="#aaa"
+                  />
+                  <Text style={styles.inputLabel}>Teléfono</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={newPhone}
+                    onChangeText={setNewPhone}
+                    placeholder="Ej: +34640330820"
+                    placeholderTextColor="#aaa"
+                    keyboardType="phone-pad"
+                  />
+                  <TouchableOpacity
+                    style={[styles.createBtn, (!newPhone.trim() || creatingContact) && { opacity: 0.5 }]}
+                    onPress={handleCreateContact}
+                    disabled={!newPhone.trim() || creatingContact}
+                  >
+                    {creatingContact
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={styles.createBtnText}>Continuar →</Text>
+                    }
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+
+            {/* ── Paso 2: elegir plantilla ── */}
+            {contactStep === 2 && (
+              <>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 18, paddingBottom: 4 }}>
+                  <Text style={styles.modalTitle}>Enviar plantilla</Text>
+                  <TouchableOpacity onPress={resetContactModal} style={{ padding: 6 }}>
+                    <Text style={{ fontSize: 20, color: '#6b7280', fontWeight: '700' }}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={{ paddingHorizontal: 20, fontSize: 13, color: '#6b7280', marginBottom: 10 }}>
+                  Selecciona una plantilla aprobada para iniciar la conversación (obligatorio en nuevos contactos).
+                </Text>
+
+                {loadingTpls && <ActivityIndicator style={{ marginVertical: 20 }} color="#075E54" />}
+
+                {!loadingTpls && templates.length === 0 && (
+                  <Text style={{ paddingHorizontal: 20, color: '#999', fontSize: 13, marginBottom: 16 }}>
+                    No hay plantillas aprobadas. Puedes crearlas en tu cuenta Meta Business.
+                  </Text>
+                )}
+
+                {!loadingTpls && templates.length > 0 && (
+                  <ScrollView style={{ maxHeight: 240 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                    {templates.map((tpl: any) => (
+                      <TouchableOpacity
+                        key={tpl.name + tpl.language}
+                        onPress={() => handleSelectTpl(tpl)}
+                        style={{
+                          paddingHorizontal: 20, paddingVertical: 12,
+                          borderBottomWidth: 1, borderBottomColor: '#f0f0f0',
+                          backgroundColor: selectedTpl?.name === tpl.name ? '#e8f5e9' : '#fff',
+                        }}
+                      >
+                        <Text style={{ fontWeight: '600', color: '#111', fontSize: 14 }}>{tpl.name}</Text>
+                        <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                          {tpl.language} · {tpl.category}
+                          {tpl.param_count > 0 ? ` · ${tpl.param_count} param(s)` : ''}
+                        </Text>
+                        {/* Preview del body */}
+                        {tpl.components?.find((c: any) => c.type === 'BODY')?.text && (
+                          <Text numberOfLines={2} style={{ fontSize: 12, color: '#374151', marginTop: 4 }}>
+                            {tpl.components.find((c: any) => c.type === 'BODY').text}
+                          </Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                )}
+
+                {/* Inputs para parámetros si la plantilla los tiene */}
+                {selectedTpl && selectedTpl.param_count > 0 && (
+                  <View style={{ paddingHorizontal: 20, paddingTop: 10, gap: 8 }}>
+                    {Array.from({ length: selectedTpl.param_count }).map((_: any, i: number) => (
+                      <View key={i}>
+                        <Text style={styles.inputLabel}>Parámetro {'{{'}{i + 1}{'}}'}</Text>
+                        <TextInput
+                          style={styles.modalInput}
+                          value={tplParams[i] || ''}
+                          onChangeText={(v: string) => setTplParams((prev: string[]) => { const a = [...prev]; a[i] = v; return a; })}
+                          placeholder={`Valor para {{${i + 1}}}`}
+                          placeholderTextColor="#aaa"
+                        />
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <View style={{ paddingHorizontal: 20, paddingVertical: 14, gap: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.createBtn, (!selectedTpl || sendingTpl) && { opacity: 0.5 }]}
+                    onPress={handleSendTemplate}
+                    disabled={!selectedTpl || sendingTpl}
+                  >
+                    {sendingTpl
+                      ? <ActivityIndicator size="small" color="#fff" />
+                      : <Text style={styles.createBtnText}>Enviar y abrir chat</Text>
+                    }
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.modalClose} onPress={handleSkipTemplate}>
+                    <Text style={styles.modalCloseText}>Omitir — solo abrir chat</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
         </View>
       </Modal>

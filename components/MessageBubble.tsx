@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Modal, Alert } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity, ActivityIndicator, Modal, Alert, Linking } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
-import { Audio } from 'expo-av';
+import { Audio, Video, ResizeMode } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
 import { format } from 'date-fns';
 import { getMediaUrl } from '../services/api';
@@ -188,6 +188,14 @@ export default function MessageBubble({ message: m, contactName, onLongPress }: 
     ? fmtAudioTime(positionMs)
     : (durationMs ? fmtAudioTime(durationMs) : '0:00');
 
+  // ── Descarga de video/documento ───────────────────────────────────────────
+  const downloadMedia = () => {
+    if (!mediaUri) return;
+    Linking.openURL(mediaUri).catch(() =>
+      Alert.alert('Error', 'No se pudo abrir el archivo.')
+    );
+  };
+
   // No se puede editar/eliminar un mensaje optimista (todavía no tiene id real
   // del servidor) — el id temporal empieza por "tmp-".
   const canLongPress = !!onLongPress && typeof m.id !== 'string';
@@ -313,17 +321,44 @@ export default function MessageBubble({ message: m, contactName, onLongPress }: 
           )
         )}
 
-        {['video', 'document'].includes(m.type) && hasMedia && (
+        {m.type === 'video' && hasMedia && (
+          fetchFailed ? (
+            <TouchableOpacity style={styles.mediaRow} onPress={fetchMedia}>
+              <Text style={styles.mediaIcon}>⚠️</Text>
+              <Text style={styles.mediaText}>No se pudo cargar — toca para reintentar</Text>
+            </TouchableOpacity>
+          ) : !mediaUri ? (
+            <View style={[styles.videoContainer, { alignItems: 'center', justifyContent: 'center' }]}>
+              <ActivityIndicator color="#888" />
+            </View>
+          ) : (
+            <View>
+              <Video
+                source={{ uri: mediaUri }}
+                style={styles.videoContainer}
+                useNativeControls
+                resizeMode={ResizeMode.CONTAIN}
+                shouldPlay={false}
+              />
+              <TouchableOpacity style={styles.downloadBtn} onPress={downloadMedia}>
+                <Ionicons name="download-outline" size={15} color="#075E54" />
+                <Text style={styles.downloadText}>Descargar</Text>
+              </TouchableOpacity>
+            </View>
+          )
+        )}
+
+        {m.type === 'document' && hasMedia && (
           <TouchableOpacity
             style={styles.mediaRow}
             onPress={fetchFailed ? fetchMedia : openMedia}
             disabled={!mediaUri && !fetchFailed}
           >
-            <Text style={styles.mediaIcon}>{fetchFailed ? '⚠️' : (ICONS[m.type] || '📎')}</Text>
+            <Text style={styles.mediaIcon}>{fetchFailed ? '⚠️' : '📄'}</Text>
             <Text style={styles.mediaText} numberOfLines={1}>
               {fetchFailed
                 ? 'No se pudo cargar — toca para reintentar'
-                : (m.body || (m.type === 'document' ? 'Documento' : 'Video'))}
+                : (m.body || 'Documento')}
             </Text>
             {!mediaUri && !fetchFailed && <ActivityIndicator size="small" color="#888" style={{ marginLeft: 6 }} />}
           </TouchableOpacity>
@@ -576,5 +611,30 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+
+  videoContainer: {
+    width: 240,
+    height: 170,
+    borderRadius: 8,
+    marginTop: 2,
+    backgroundColor: '#000',
+    overflow: 'hidden',
+  },
+  downloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 5,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(7,94,84,0.08)',
+    alignSelf: 'flex-start',
+  },
+  downloadText: {
+    fontSize: 12,
+    color: '#075E54',
+    fontWeight: '600',
   },
 });

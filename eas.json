@@ -20,10 +20,22 @@
       "node": "20.19.4",
       "android": {
         "buildType": "apk"
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      }
+    },
+    "production-ios": {
+      "autoIncrement": true,
+      "node": "20.19.4",
+      "ios": {
+        "buildConfiguration": "Release"
       }
     }
   },
   "submit": {
-    "production": {}
+    "production-ios": {
+      "ios": {}
+    }
   }
 }

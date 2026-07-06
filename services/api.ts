@@ -54,8 +54,8 @@ export const getPipeline = () =>
   api.get('/conversations/pipeline').then(r => r.data);
 
 // ── Mensajes ──────────────────────────────────────────────────────────────────
-export const getMessages = (convId: number, page = 1) =>
-  api.get(`/conversations/${convId}/messages`, { params: { page } }).then(r => r.data);
+export const getMessages = (convId: number, page = 1, limit = 200) =>
+  api.get(`/conversations/${convId}/messages`, { params: { page, limit } }).then(r => r.data);
 
 export const sendMessage = (convId: number, payload: {
   type?: 'text' | 'template';
@@ -149,6 +149,10 @@ export const deleteTask = (taskId: number) =>
 
 export const getQuickReplies = () =>
   api.get('/quick-replies').then(r => r.data as any[]);
+
+// ── Plantillas WhatsApp aprobadas ─────────────────────────────────────────────
+export const getTemplates = () =>
+  api.get('/templates').then(r => r.data.templates as any[]);
 
 // ── Etiquetas (Labels) ────────────────────────────────────────────────────────
 export interface Label {

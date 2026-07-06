@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View, FlatList, TextInput, TouchableOpacity, StyleSheet,
   Text, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Alert, Modal, ScrollView,
+  Alert, Modal, ScrollView, Linking, Keyboard,
 } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -78,10 +78,16 @@ export default function ConversationScreen() {
   // Nota interna (solo visible para agentes — fondo ámbar)
   const [isInternal, setIsInternal] = useState(false);
 
+  // Bandeja de acciones rápidas (+ button)
+  const [showActionTray, setShowActionTray] = useState(false);
+
   // Agendar cita desde el chat (pre-rellena el contacto)
   const [showApptModal, setShowApptModal]   = useState(false);
   const [apptTitle, setApptTitle]           = useState('');
   const [apptDate, setApptDate]             = useState('');
+  const [apptDay, setApptDay]               = useState('');
+  const [apptMonth, setApptMonth]           = useState('');
+  const [apptYear, setApptYear]             = useState('');
   const [apptTime, setApptTime]             = useState('09:00');
   const [apptDuration, setApptDuration]     = useState(30);
   const [apptNotes, setApptNotes]           = useState('');
@@ -98,6 +104,7 @@ export default function ConversationScreen() {
   } | null>(null);
 
   const flatRef = useRef<FlatList>(null);
+  const isAtBottom = useRef(true);
   const recordingRef = useRef<Audio.Recording | null>(null);
   const recTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -557,22 +564,6 @@ export default function ConversationScreen() {
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.actionBtn}
-              onPress={() => {
-                const today = new Date().toISOString().slice(0, 10);
-                setApptDate(today);
-                setApptTitle('');
-                setApptTime('09:00');
-                setApptDuration(30);
-                setApptNotes('');
-                setApptSlots([]);
-                getAvailabilitySlots(today).then(r => setApptSlots(r.slots || [])).catch(() => {});
-                setShowApptModal(true);
-              }}
-            >
-              <Text style={styles.actionBtnText}>📅</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[styles.actionBtn, isClosed ? styles.actionBtnGreen : styles.actionBtnRed]}
               onPress={handleToggleStatus}
             >
@@ -638,8 +629,13 @@ export default function ConversationScreen() {
           );
         }}
         contentContainerStyle={styles.messagesList}
+        onScroll={e => {
+          const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+          isAtBottom.current = contentOffset.y >= contentSize.height - layoutMeasurement.height - 80;
+        }}
+        scrollEventThrottle={100}
         onLayout={() => flatRef.current?.scrollToEnd({ animated: false })}
-        onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => { if (isAtBottom.current) flatRef.current?.scrollToEnd({ animated: false }); }}
         ListEmptyComponent={
           <View style={styles.emptyMessages}>
             <Text style={styles.emptyText}>No hay mensajes aún</Text>
@@ -684,30 +680,13 @@ export default function ConversationScreen() {
         </View>
       ) : (
         <View style={styles.inputRow}>
-          <TouchableOpacity
-            style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
-            onPress={() => setShowAttach(true)}
-            disabled={isClosed || uploading}
-          >
-            {uploading
-              ? <ActivityIndicator size="small" color="#666" />
-              : <Text style={styles.attachIcon}>📎</Text>
-            }
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.attachBtn, isClosed && styles.sendBtnDisabled]}
-            onPress={() => setShowQR(true)}
-            disabled={isClosed}
-          >
-            <Text style={styles.attachIcon}>⚡</Text>
-          </TouchableOpacity>
-          {/* Toggle nota interna */}
+          {/* Botón + abre bandeja de acciones */}
           <TouchableOpacity
             style={[styles.attachBtn, isInternal && styles.internalBtn, isClosed && styles.sendBtnDisabled]}
-            onPress={() => setIsInternal(v => !v)}
+            onPress={() => setShowActionTray(true)}
             disabled={isClosed}
           >
-            <Ionicons name={isInternal ? 'lock-closed' : 'lock-open-outline'} size={18} color={isInternal ? '#92400e' : '#aaa'} />
+            <Text style={[styles.attachIcon, { fontSize: 22, fontWeight: '400', color: isInternal ? '#92400e' : '#888' }]}>+</Text>
           </TouchableOpacity>
           <TextInput
             style={[styles.input, isInternal && styles.inputInternal]}
@@ -742,6 +721,74 @@ export default function ConversationScreen() {
           )}
         </View>
       )}
+
+      {/* Bandeja de acciones rápidas (botón +) */}
+      <Modal visible={showActionTray} transparent animationType="slide">
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowActionTray(false)}
+        >
+          <View style={[styles.modalBox, { paddingBottom: 24 }]}>
+            <Text style={styles.modalTitle}>Acciones</Text>
+
+            {/* Adjuntar */}
+            <TouchableOpacity
+              style={styles.attachOptionRow}
+              onPress={() => { setShowActionTray(false); setTimeout(() => setShowAttach(true), 200); }}
+            >
+              <Text style={styles.attachOptionIcon}>📎</Text>
+              <Text style={styles.attachOptionText}>Adjuntar archivo</Text>
+              {uploading && <ActivityIndicator size="small" color="#666" style={{ marginLeft: 8 }} />}
+            </TouchableOpacity>
+
+            {/* Plantillas rápidas */}
+            <TouchableOpacity
+              style={styles.attachOptionRow}
+              onPress={() => { setShowActionTray(false); setTimeout(() => setShowQR(true), 200); }}
+            >
+              <Text style={styles.attachOptionIcon}>⚡</Text>
+              <Text style={styles.attachOptionText}>Plantillas rápidas</Text>
+            </TouchableOpacity>
+
+            {/* Nota interna */}
+            <TouchableOpacity
+              style={[styles.attachOptionRow, isInternal && { backgroundColor: '#fef3c7', borderRadius: 10 }]}
+              onPress={() => { setIsInternal(v => !v); setShowActionTray(false); }}
+            >
+              <Ionicons
+                name={isInternal ? 'lock-closed' : 'lock-open-outline'}
+                size={20}
+                color={isInternal ? '#92400e' : '#555'}
+                style={{ width: 32, textAlign: 'center' }}
+              />
+              <Text style={[styles.attachOptionText, isInternal && { color: '#92400e', fontWeight: '600' }]}>
+                {isInternal ? 'Nota interna activa' : 'Nota interna'}
+              </Text>
+              {isInternal && <Text style={{ marginLeft: 'auto', fontSize: 13, color: '#92400e' }}>✓</Text>}
+            </TouchableOpacity>
+
+            {/* Agendar cita */}
+            <TouchableOpacity
+              style={styles.attachOptionRow}
+              onPress={() => {
+                setShowActionTray(false);
+                setApptTitle(conversation?.contact_name ? `Cita con ${conversation.contact_name}` : 'Nueva cita');
+                const today = new Date();
+                const dd = String(today.getDate()).padStart(2,'0');
+                const mm = String(today.getMonth()+1).padStart(2,'0');
+                const yyyy = String(today.getFullYear());
+                setApptDay(dd); setApptMonth(mm); setApptYear(yyyy);
+                setApptDate(`${yyyy}-${mm}-${dd}`);
+                setTimeout(() => setShowApptModal(true), 200);
+              }}
+            >
+              <Text style={styles.attachOptionIcon}>📅</Text>
+              <Text style={styles.attachOptionText}>Agendar cita</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* Modal selector de etapa */}
       <Modal visible={showStagePicker} transparent animationType="fade">
@@ -1107,9 +1154,16 @@ export default function ConversationScreen() {
       {/* Modal agendar cita rápida desde el chat */}
       <Modal visible={showApptModal} transparent animationType="slide" onRequestClose={() => setShowApptModal(false)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowApptModal(false)}>
+          <View style={styles.modalOverlay} pointerEvents="box-none">
             <View style={[styles.modalBox, { maxHeight: '85%' }]}>
-              <Text style={styles.modalTitle}>📅 Nueva cita</Text>
+              {/* Cabecera con título y botón cerrar */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Text style={styles.modalTitle}>📅 Nueva cita</Text>
+                <TouchableOpacity onPress={() => setShowApptModal(false)} style={{ padding: 6 }}>
+                  <Text style={{ fontSize: 20, color: '#6b7280', fontWeight: '700' }}>✕</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" nestedScrollEnabled={true}>
               {conversation?.contact_name ? (
                 <Text style={{ fontSize: 13, color: '#128C7E', marginBottom: 8, fontWeight: '600' }}>
                   👤 {conversation.contact_name}
@@ -1118,43 +1172,129 @@ export default function ConversationScreen() {
 
               <Text style={[styles.modalTitle, { fontSize: 12, color: '#6b7280', fontWeight: '600', marginBottom: 4 }]}>TÍTULO *</Text>
               <TextInput
-                style={[styles.modalInput ?? {
-                  borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8,
-                  padding: 10, fontSize: 15, marginBottom: 10, color: '#111',
-                }]}
+                style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 15, marginBottom: 10, color: '#111' }}
                 value={apptTitle}
                 onChangeText={setApptTitle}
                 placeholder="Ej: Llamada de seguimiento"
                 placeholderTextColor="#aaa"
               />
 
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>FECHA</Text>
+              {/* Selector DD / MM / AAAA — controlado */}
+              <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 6 }}>FECHA</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 10, color: '#9ca3af', marginBottom: 3 }}>DÍA</Text>
                   <TextInput
-                    style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 14, color: '#111' }}
-                    value={apptDate}
-                    onChangeText={d => {
-                      setApptDate(d);
-                      if (d.length === 10) getAvailabilitySlots(d).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                    style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 10, fontSize: 18, color: '#111', textAlign: 'center', width: '100%', fontWeight: '600' }}
+                    value={apptDay}
+                    onChangeText={v => {
+                      setApptDay(v);
+                      if (v.length === 2 && apptMonth.length === 2 && apptYear.length === 4) {
+                        const val = `${apptYear}-${apptMonth}-${v}`;
+                        setApptDate(val);
+                        getAvailabilitySlots(val).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                      }
                     }}
-                    placeholder="YYYY-MM-DD"
-                    placeholderTextColor="#aaa"
+                    placeholder="DD"
+                    placeholderTextColor="#ccc"
                     keyboardType="numeric"
-                    maxLength={10}
+                    maxLength={2}
                   />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 4 }}>HORA</Text>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 10, color: '#9ca3af', marginBottom: 3 }}>MES</Text>
                   <TextInput
-                    style={{ borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 8, padding: 10, fontSize: 14, color: '#111' }}
-                    value={apptTime}
-                    onChangeText={setApptTime}
-                    placeholder="HH:MM"
-                    placeholderTextColor="#aaa"
+                    style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 10, fontSize: 18, color: '#111', textAlign: 'center', width: '100%', fontWeight: '600' }}
+                    value={apptMonth}
+                    onChangeText={v => {
+                      setApptMonth(v);
+                      if (apptDay.length === 2 && v.length === 2 && apptYear.length === 4) {
+                        const val = `${apptYear}-${v}-${apptDay}`;
+                        setApptDate(val);
+                        getAvailabilitySlots(val).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                      }
+                    }}
+                    placeholder="MM"
+                    placeholderTextColor="#ccc"
                     keyboardType="numeric"
-                    maxLength={5}
+                    maxLength={2}
                   />
+                </View>
+                <View style={{ flex: 2, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 10, color: '#9ca3af', marginBottom: 3 }}>AÑO</Text>
+                  <TextInput
+                    style={{ borderWidth: 1, borderColor: '#d1d5db', borderRadius: 8, padding: 10, fontSize: 18, color: '#111', textAlign: 'center', width: '100%', fontWeight: '600' }}
+                    value={apptYear}
+                    onChangeText={v => {
+                      setApptYear(v);
+                      if (apptDay.length === 2 && apptMonth.length === 2 && v.length === 4) {
+                        const val = `${v}-${apptMonth}-${apptDay}`;
+                        setApptDate(val);
+                        getAvailabilitySlots(val).then(r => setApptSlots(r.slots || [])).catch(() => {});
+                      }
+                    }}
+                    placeholder="AAAA"
+                    placeholderTextColor="#ccc"
+                    keyboardType="numeric"
+                    maxLength={4}
+                  />
+                </View>
+              </View>
+
+              {/* Hora — scroll picker */}
+              <Text style={{ fontSize: 11, color: '#6b7280', fontWeight: '600', marginBottom: 6 }}>HORA</Text>
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 10, justifyContent: 'center' }}>
+                {/* Horas */}
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 10, color: '#9ca3af', marginBottom: 4 }}>HH</Text>
+                  <View style={{ height: 120, width: 64, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, overflow: 'hidden' }}>
+                    <ScrollView
+                      showsVerticalScrollIndicator={false}
+                      snapToInterval={40}
+                      decelerationRate="fast"
+                      nestedScrollEnabled={true}
+                      contentContainerStyle={{ paddingVertical: 40 }}
+                      onMomentumScrollEnd={e => {
+                        const idx = Math.round(e.nativeEvent.contentOffset.y / 40);
+                        const h = String(Math.min(Math.max(idx, 0), 23)).padStart(2, '0');
+                        setApptTime(`${h}:${apptTime.split(':')[1] || '00'}`);
+                      }}
+                    >
+                      {Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0')).map(h => (
+                        <TouchableOpacity key={h} style={{ height: 40, justifyContent: 'center', alignItems: 'center' }}
+                          onPress={() => setApptTime(`${h}:${apptTime.split(':')[1] || '00'}`)}>
+                          <Text style={{ fontSize: 20, fontWeight: '600', color: apptTime.startsWith(h) ? '#075E54' : '#374151' }}>{h}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 28, fontWeight: '700', color: '#374151', alignSelf: 'center', marginTop: 16 }}>:</Text>
+                {/* Minutos */}
+                <View style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 10, color: '#9ca3af', marginBottom: 4 }}>MM</Text>
+                  <View style={{ height: 120, width: 64, borderWidth: 1, borderColor: '#d1d5db', borderRadius: 10, overflow: 'hidden' }}>
+                    <ScrollView
+                      showsVerticalScrollIndicator={false}
+                      snapToInterval={40}
+                      decelerationRate="fast"
+                      nestedScrollEnabled={true}
+                      contentContainerStyle={{ paddingVertical: 40 }}
+                      onMomentumScrollEnd={e => {
+                        const mins = ['00','05','10','15','20','25','30','35','40','45','50','55'];
+                        const idx = Math.round(e.nativeEvent.contentOffset.y / 40);
+                        const m = mins[Math.min(Math.max(idx, 0), mins.length - 1)];
+                        setApptTime(`${apptTime.split(':')[0] || '09'}:${m}`);
+                      }}
+                    >
+                      {['00','05','10','15','20','25','30','35','40','45','50','55'].map(m => (
+                        <TouchableOpacity key={m} style={{ height: 40, justifyContent: 'center', alignItems: 'center' }}
+                          onPress={() => setApptTime(`${apptTime.split(':')[0] || '09'}:${m}`)}>
+                          <Text style={{ fontSize: 20, fontWeight: '600', color: apptTime.endsWith(m) ? '#075E54' : '#374151' }}>{m}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
                 </View>
               </View>
 
@@ -1204,25 +1344,44 @@ export default function ConversationScreen() {
                 placeholder="Observaciones..."
                 placeholderTextColor="#aaa"
                 multiline
+                blurOnSubmit
+                returnKeyType="done"
+                onSubmitEditing={() => Keyboard.dismiss()}
+                onBlur={() => Keyboard.dismiss()}
               />
 
+              </ScrollView>
+
               <TouchableOpacity
-                style={[styles.modalClose, { backgroundColor: '#075E54', marginBottom: 8 }]}
+                style={[styles.modalClose, { backgroundColor: '#075E54', marginBottom: 8, marginTop: 10 }]}
                 onPress={async () => {
+                  Keyboard.dismiss();
                   if (!apptTitle.trim()) { Alert.alert('Falta el título'); return; }
-                  if (!/^\d{4}-\d{2}-\d{2}$/.test(apptDate)) { Alert.alert('Fecha inválida'); return; }
+                  // Construir fecha desde los campos individuales si apptDate está vacío
+                  const finalDate = (apptDay.length === 2 && apptMonth.length === 2 && apptYear.length === 4)
+                    ? `${apptYear}-${apptMonth}-${apptDay}`
+                    : apptDate;
+                  if (!/^\d{4}-\d{2}-\d{2}$/.test(finalDate)) { Alert.alert('Fecha inválida', 'Rellena día, mes y año'); return; }
                   setSavingAppt(true);
                   try {
                     await createAppointment({
                       title: apptTitle.trim(),
                       contact_id: conversation?.contact_id ?? null,
                       conversation_id: convId,
-                      scheduled_at: `${apptDate}T${apptTime}:00.000Z`,
+                      scheduled_at: `${finalDate}T${apptTime}:00.000Z`,
                       duration_minutes: apptDuration,
                       notes: apptNotes || null,
                     });
+                    // Crear recordatorio en la sección de tareas
+                    const taskTitle = `📅 ${apptTitle.trim()} — ${apptDay}/${apptMonth}/${apptYear} ${apptTime}`;
+                    try {
+                      const newTask = await createConversationTask(convId, {
+                        title: taskTitle,
+                        due_at: `${finalDate}T${apptTime}:00.000Z`,
+                      });
+                      setTasks(prev => [...prev, newTask]);
+                    } catch (_) {}
                     setShowApptModal(false);
-                    Alert.alert('✅ Cita guardada', `${apptTitle} — ${apptDate} ${apptTime}`);
                   } catch (err: any) {
                     Alert.alert('Error', err?.response?.data?.error ?? 'No se pudo guardar');
                   } finally {
@@ -1239,7 +1398,7 @@ export default function ConversationScreen() {
                 <Text style={styles.modalCloseText}>Cancelar</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </KeyboardAvoidingView>
       </Modal>
 
@@ -1266,23 +1425,32 @@ export default function ConversationScreen() {
             <Text style={styles.contactInfoName}>
               {conversation?.contact_name || conversation?.wa_id}
             </Text>
-            {/* Teléfono */}
+            {/* Teléfono — toca para llamar */}
             {(conversation?.phone || conversation?.wa_id) && (
-              <View style={styles.contactInfoRow}>
+              <TouchableOpacity
+                style={styles.contactInfoRow}
+                onPress={() => {
+                  const num = conversation?.phone || ('+' + conversation?.wa_id);
+                  Linking.openURL(`tel:${num.replace(/\s/g, '')}`);
+                }}
+              >
                 <Ionicons name="call-outline" size={18} color="#128C7E" />
-                <Text style={styles.contactInfoPhone}>
+                <Text style={[styles.contactInfoPhone, { color: '#128C7E', textDecorationLine: 'underline' }]}>
                   {conversation?.phone || '+' + conversation?.wa_id}
                 </Text>
-              </View>
+              </TouchableOpacity>
             )}
-            {/* wa_id siempre (número de WhatsApp) */}
+            {/* WhatsApp — toca para abrir chat */}
             {conversation?.wa_id && (
-              <View style={styles.contactInfoRow}>
+              <TouchableOpacity
+                style={styles.contactInfoRow}
+                onPress={() => Linking.openURL(`https://wa.me/${conversation.wa_id}`)}
+              >
                 <Ionicons name="logo-whatsapp" size={18} color="#25D366" />
-                <Text style={styles.contactInfoPhone}>
+                <Text style={[styles.contactInfoPhone, { color: '#25D366', textDecorationLine: 'underline' }]}>
                   +{conversation?.wa_id}
                 </Text>
-              </View>
+              </TouchableOpacity>
             )}
             <TouchableOpacity style={styles.modalClose} onPress={() => setShowContactInfo(false)}>
               <Text style={styles.modalCloseText}>Cerrar</Text>
@@ -1527,7 +1695,9 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     paddingTop: 16,
-    maxHeight: '60%',
+    paddingHorizontal: 16,
+    maxHeight: '80%',
+    width: '100%',
   },
   modalTitle: {
     fontSize: 17,
